@@ -1,6 +1,6 @@
 import { loadConfig } from './config';
 import { sendTurn } from './gatewayClient';
-import { bindKeyboardInput, type InputEventName } from './input';
+import { bindKeyboardInput, bindTouchInput, type InputEventName } from './input';
 import { render } from './renderer';
 import { backHome, initialState, movePage, moveSelection, showError, showLoading, showPages } from './state';
 import { MODES, type AppState } from './types';
@@ -62,4 +62,5 @@ function handleInput(eventName: InputEventName): void {
 }
 
 bindKeyboardInput(handleInput);
+bindTouchInput(root, handleInput);
 render(root, state);
