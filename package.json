@@ -1,0 +1,26 @@
+{
+  "name": "g2-vega-hud",
+  "version": "0.1.0",
+  "description": "Even Realities G2 heads-up client for VEGA.",
+  "type": "module",
+  "private": false,
+  "scripts": {
+    "dev": "vite --host 0.0.0.0",
+    "build": "tsc && vite build",
+    "preview": "vite preview --host 0.0.0.0",
+    "simulator": "evenhub-simulator http://localhost:5173",
+    "qr": "evenhub qr --url"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "@evenrealities/even_hub_sdk": "^0.0.10"
+  },
+  "devDependencies": {
+    "@evenrealities/evenhub-cli": "^0.1.12",
+    "@evenrealities/evenhub-simulator": "^0.7.2",
+    "typescript": "^5.8.2",
+    "vite": "^6.2.0"
+  }
+}
