@@ -24,6 +24,21 @@ export function bindTouchInput(target: HTMLElement, handler: (eventName: InputEv
   let startX = 0;
   let startTime = 0;
   let lastTapTime = 0;
+  let suppressNextClick = false;
+
+  target.addEventListener(
+    'click',
+    (event) => {
+      if (!suppressNextClick) {
+        return;
+      }
+
+      suppressNextClick = false;
+      event.preventDefault();
+      event.stopPropagation();
+    },
+    true
+  );
 
   target.addEventListener(
     'touchstart',
@@ -51,6 +66,10 @@ export function bindTouchInput(target: HTMLElement, handler: (eventName: InputEv
       const absY = Math.abs(deltaY);
 
       if (absY >= 40 && absY > absX) {
+        suppressNextClick = true;
+        window.setTimeout(() => {
+          suppressNextClick = false;
+        }, 450);
         handler(deltaY < 0 ? 'up' : 'down');
         return;
       }
