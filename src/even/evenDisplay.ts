@@ -1,15 +1,43 @@
-import {
-  waitForEvenAppBridge,
-  type CreateStartUpPageContainer,
-  type TextContainerProperty,
-  type TextContainerUpgrade
-} from '@evenrealities/even_hub_sdk';
+import { waitForEvenAppBridge } from '@evenrealities/even_hub_sdk';
 import type { AppState } from '../types';
 import { MODES } from '../types';
 
 const TITLE_ID = 1;
 const BODY_ID = 2;
 const HELP_ID = 3;
+
+type TextContainerPayload = {
+  containerID: number;
+  containerName: string;
+  xPosition: number;
+  yPosition: number;
+  width: number;
+  height: number;
+  content: string;
+  isEventCapture: 0 | 1;
+};
+
+type PageContainerPayload = {
+  containerTotalNum: number;
+  textObject: TextContainerPayload[];
+};
+
+type TextUpgradePayload = {
+  containerID: number;
+  containerName: string;
+  content: string;
+};
+
+type EvenBridgeLike = {
+  createStartUpPageContainer(container: PageContainerPayload): Promise<number>;
+  textContainerUpgrade(container: TextUpgradePayload): Promise<boolean>;
+};
+
+type Frame = {
+  title: string;
+  body: string;
+  help: string;
+};
 
 export type EvenDisplay = {
   render(state: AppState): Promise<void>;
@@ -18,7 +46,7 @@ export type EvenDisplay = {
 export async function createEvenDisplay(timeoutMs = 1500): Promise<EvenDisplay | null> {
   try {
     const bridge = await withTimeout(waitForEvenAppBridge(), timeoutMs);
-    const display = new EvenGlassesDisplay(bridge as EvenBridgeLike);
+    const display = new EvenGlassesDisplay(bridge as unknown as EvenBridgeLike);
     await display.initialize();
     return display;
   } catch {
@@ -34,7 +62,7 @@ class EvenGlassesDisplay implements EvenDisplay {
   async initialize(): Promise<void> {
     if (this.initialized) return;
 
-    const page: CreateStartUpPageContainer = {
+    const page: PageContainerPayload = {
       containerTotalNum: 3,
       textObject: [
         textContainer(TITLE_ID, 'title', 24, 24, 560, 48, 'VEGA HUD', 0),
@@ -51,6 +79,7 @@ class EvenGlassesDisplay implements EvenDisplay {
     if (!this.initialized) return;
 
     const frame = frameForState(state);
+
     await Promise.all([
       this.bridge.textContainerUpgrade(textUpgrade(TITLE_ID, 'title', frame.title)),
       this.bridge.textContainerUpgrade(textUpgrade(BODY_ID, 'body', frame.body)),
@@ -58,17 +87,6 @@ class EvenGlassesDisplay implements EvenDisplay {
     ]);
   }
 }
-
-type EvenBridgeLike = {
-  createStartUpPageContainer(container: CreateStartUpPageContainer): Promise<number>;
-  textContainerUpgrade(container: TextContainerUpgrade): Promise<boolean>;
-};
-
-type Frame = {
-  title: string;
-  body: string;
-  help: string;
-};
 
 function frameForState(state: AppState): Frame {
   if (state.screen === 'home') {
@@ -81,6 +99,7 @@ function frameForState(state: AppState): Frame {
 
   if (state.screen === 'loading') {
     const selected = MODES[state.selectedModeIndex];
+
     return {
       title: selected?.label ?? 'VEGA',
       body: 'Thinking...',
@@ -112,7 +131,7 @@ function textContainer(
   height: number,
   content: string,
   isEventCapture: 0 | 1
-): TextContainerProperty {
+): TextContainerPayload {
   return {
     containerID,
     containerName,
@@ -125,7 +144,7 @@ function textContainer(
   };
 }
 
-function textUpgrade(containerID: number, containerName: string, content: string): TextContainerUpgrade {
+function textUpgrade(containerID: number, containerName: string, content: string): TextUpgradePayload {
   return {
     containerID,
     containerName,
@@ -135,12 +154,17 @@ function textUpgrade(containerID: number, containerName: string, content: string
 
 function formatForGlasses(value: string): string {
   const normalized = value.replace(/\s+/g, ' ').trim();
-  if (normalized.length <= 220) return normalized;
+
+  if (normalized.length <= 220) {
+    return normalized;
+  }
+
   return `${normalized.slice(0, 217).trim()}...`;
 }
 
 async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
   let timeoutId: ReturnType<typeof setTimeout> | undefined;
+
   const timeout = new Promise<never>((_, reject) => {
     timeoutId = setTimeout(() => reject(new Error('Even bridge unavailable')), timeoutMs);
   });
@@ -148,6 +172,8 @@ async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T
   try {
     return await Promise.race([promise, timeout]);
   } finally {
-    if (timeoutId) clearTimeout(timeoutId);
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+    }
   }
 }

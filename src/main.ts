@@ -1,4 +1,5 @@
 import { loadConfig } from './config';
+import { createEvenDisplay, type EvenDisplay } from './even/evenDisplay';
 import { sendTurn } from './gatewayClient';
 import { bindKeyboardInput, bindTouchInput, type InputEventName } from './input';
 import { render } from './renderer';
@@ -7,16 +8,24 @@ import { MODES, type AppState } from './types';
 import './style.css';
 
 const root = document.querySelector<HTMLDivElement>('#app');
+
 if (!root) {
   throw new Error('Missing app root element');
 }
 
+const appRoot: HTMLDivElement = root;
+
 let state: AppState = initialState();
+let evenDisplay: EvenDisplay | null = null;
 const config = loadConfig();
 
 function commit(nextState: AppState): void {
   state = nextState;
-  render(root, state);
+  render(appRoot, state);
+
+  if (evenDisplay) {
+    evenDisplay.render(state).catch(() => undefined);
+  }
 }
 
 async function runSelectedMode(): Promise<void> {
@@ -61,6 +70,15 @@ function handleInput(eventName: InputEventName): void {
   }
 }
 
+async function initializeEvenDisplay(): Promise<void> {
+  evenDisplay = await createEvenDisplay();
+
+  if (evenDisplay) {
+    await evenDisplay.render(state);
+  }
+}
+
 bindKeyboardInput(handleInput);
-bindTouchInput(root, handleInput);
-render(root, state);
+bindTouchInput(appRoot, handleInput);
+render(appRoot, state);
+initializeEvenDisplay().catch(() => undefined);
