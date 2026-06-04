@@ -37,14 +37,16 @@ function renderHome(state: AppState): HTMLElement {
   list.className = 'mode-list';
 
   MODES.forEach((item, index) => {
-    const row = document.createElement('div');
+    const row = document.createElement('button');
     row.className = index === state.selectedModeIndex ? 'mode selected' : 'mode';
     row.textContent = `${index === state.selectedModeIndex ? '>' : ' '} ${item.label}`;
+    row.type = 'button';
+    row.dataset.modeIndex = String(index);
     list.appendChild(row);
   });
 
   section.appendChild(list);
-  section.appendChild(help('Swipe: move • Press: select'));
+  section.appendChild(help('Swipe: move • Tap: select'));
   return section;
 }
 
@@ -54,7 +56,7 @@ function renderLoading(state: AppState): HTMLElement {
   section.className = 'screen center';
   section.appendChild(title(selected?.label ?? 'VEGA'));
   section.appendChild(text('Thinking...'));
-  section.appendChild(help('Double press: cancel'));
+  section.appendChild(help('Double tap: cancel'));
   return section;
 }
 
@@ -70,7 +72,7 @@ function renderPages(state: AppState): HTMLElement {
 
   section.appendChild(title(`${response.title} ${state.pageIndex + 1}/${response.pages.length}`));
   section.appendChild(text(response.pages[state.pageIndex] ?? ''));
-  section.appendChild(help('Swipe: page • Double: home'));
+  section.appendChild(help('Swipe: page • Tap: home'));
   return section;
 }
 
@@ -79,7 +81,7 @@ function renderError(state: AppState): HTMLElement {
   section.className = 'screen center';
   section.appendChild(title('Gateway error'));
   section.appendChild(text(state.errorMessage ?? 'Unknown error'));
-  section.appendChild(help('Press: home'));
+  section.appendChild(help('Tap: home'));
   return section;
 }
 
