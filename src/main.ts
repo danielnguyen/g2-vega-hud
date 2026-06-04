@@ -1,5 +1,6 @@
 import { loadConfig } from './config';
 import { createEvenDisplay, type EvenDisplay } from './even/evenDisplay';
+import { bindEvenInput } from './even/evenInput';
 import { sendTurn } from './gatewayClient';
 import { bindKeyboardInput, bindTouchInput, type InputEventName } from './input';
 import { render } from './renderer';
@@ -100,6 +101,7 @@ async function initializeEvenDisplay(): Promise<void> {
 
 bindKeyboardInput(handleInput);
 bindTouchInput(appRoot, handleInput);
+bindEvenInput(handleInput).catch(() => undefined);
 render(appRoot, state);
 bindModeClicks();
 initializeEvenDisplay().catch(() => undefined);
