@@ -24,18 +24,15 @@ export function bindTouchInput(target: HTMLElement, handler: (eventName: InputEv
   let startX = 0;
   let startTime = 0;
   let lastTapTime = 0;
-  let suppressNextClick = false;
+  let suppressClickUntil = 0;
 
   target.addEventListener(
     'click',
     (event) => {
-      if (!suppressNextClick) {
-        return;
+      if (Date.now() < suppressClickUntil) {
+        event.preventDefault();
+        event.stopPropagation();
       }
-
-      suppressNextClick = false;
-      event.preventDefault();
-      event.stopPropagation();
     },
     true
   );
@@ -65,16 +62,20 @@ export function bindTouchInput(target: HTMLElement, handler: (eventName: InputEv
       const absX = Math.abs(deltaX);
       const absY = Math.abs(deltaY);
 
-      if (absY >= 40 && absY > absX) {
-        suppressNextClick = true;
-        window.setTimeout(() => {
-          suppressNextClick = false;
-        }, 450);
+      if (absY >= 28 && absY > absX * 1.15) {
+        event.preventDefault();
+        event.stopPropagation();
+        suppressClickUntil = Date.now() + 700;
         handler(deltaY < 0 ? 'up' : 'down');
         return;
       }
 
       if (elapsed <= 500 && absX < 20 && absY < 20) {
+        const targetElement = event.target instanceof Element ? event.target : null;
+        if (targetElement?.closest('[data-mode-index]')) {
+          return;
+        }
+
         const now = Date.now();
         if (now - lastTapTime < 320) {
           lastTapTime = 0;
@@ -90,6 +91,6 @@ export function bindTouchInput(target: HTMLElement, handler: (eventName: InputEv
         }
       }
     },
-    { passive: true }
+    { passive: false }
   );
 }
