@@ -22,6 +22,7 @@ const config = loadConfig();
 function commit(nextState: AppState): void {
   state = nextState;
   render(appRoot, state);
+  bindModeClicks();
 
   if (evenDisplay) {
     evenDisplay.render(state).catch(() => undefined);
@@ -43,6 +44,25 @@ async function runSelectedMode(): Promise<void> {
   } catch (error) {
     commit(showError(state, error instanceof Error ? error.message : 'Gateway request failed'));
   }
+}
+
+function bindModeClicks(): void {
+  appRoot.querySelectorAll<HTMLElement>('[data-mode-index]').forEach((element) => {
+    element.addEventListener('click', () => {
+      const modeIndex = Number(element.dataset.modeIndex);
+
+      if (!Number.isInteger(modeIndex) || modeIndex < 0 || modeIndex >= MODES.length) {
+        return;
+      }
+
+      state = {
+        ...state,
+        selectedModeIndex: modeIndex
+      };
+
+      void runSelectedMode();
+    });
+  });
 }
 
 function handleInput(eventName: InputEventName): void {
@@ -81,4 +101,5 @@ async function initializeEvenDisplay(): Promise<void> {
 bindKeyboardInput(handleInput);
 bindTouchInput(appRoot, handleInput);
 render(appRoot, state);
+bindModeClicks();
 initializeEvenDisplay().catch(() => undefined);
