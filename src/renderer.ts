@@ -1,3 +1,4 @@
+import { APP_VERSION, ERROR_FOOTER, HOME_FOOTER, LOADING_FOOTER, PAGES_FOOTER } from './constants';
 import type { AppState } from './types';
 import { MODES } from './types';
 
@@ -31,7 +32,7 @@ function renderFrame(state: AppState): HTMLElement {
 function renderHome(state: AppState): HTMLElement {
   const section = document.createElement('section');
   section.className = 'screen';
-  section.appendChild(title('VEGA HUD'));
+  section.appendChild(title(APP_VERSION));
 
   const list = document.createElement('div');
   list.className = 'mode-list';
@@ -46,7 +47,7 @@ function renderHome(state: AppState): HTMLElement {
   });
 
   section.appendChild(list);
-  section.appendChild(help('Swipe: move • Tap: select'));
+  section.appendChild(help(HOME_FOOTER));
   return section;
 }
 
@@ -56,7 +57,7 @@ function renderLoading(state: AppState): HTMLElement {
   section.className = 'screen center';
   section.appendChild(title(selected?.label ?? 'VEGA'));
   section.appendChild(text('Thinking...'));
-  section.appendChild(help('Double tap: cancel'));
+  section.appendChild(help(LOADING_FOOTER));
   return section;
 }
 
@@ -72,7 +73,7 @@ function renderPages(state: AppState): HTMLElement {
 
   section.appendChild(title(`${response.title} ${state.pageIndex + 1}/${response.pages.length}`));
   section.appendChild(text(response.pages[state.pageIndex] ?? ''));
-  section.appendChild(help('Swipe: page • Tap: home'));
+  section.appendChild(help(PAGES_FOOTER));
   return section;
 }
 
@@ -81,7 +82,7 @@ function renderError(state: AppState): HTMLElement {
   section.className = 'screen center';
   section.appendChild(title('Gateway error'));
   section.appendChild(text(state.errorMessage ?? 'Unknown error'));
-  section.appendChild(help('Tap: home'));
+  section.appendChild(help(ERROR_FOOTER));
   return section;
 }
 

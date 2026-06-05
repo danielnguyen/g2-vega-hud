@@ -1,6 +1,6 @@
 # g2-vega-hud
 
-Even Realities G2 heads-up client for VEGA.
+VEGA HUD v0.2 is an Even Realities G2 heads-up client for VEGA.
 
 This app is a thin wearable surface. It sends short mode-based requests to `g2-gateway`, then renders the returned `pages[]` response.
 

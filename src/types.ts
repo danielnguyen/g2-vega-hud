@@ -24,21 +24,23 @@ export const MODES: Array<{ mode: Mode; label: string; prompt: string }> = [
   {
     mode: 'brief',
     label: 'Brief',
-    prompt: 'Give me a concise current status brief for my active threads.'
+    prompt:
+      'Give me a concise current status brief for my active threads. Include only the top 3 items and one next action. Keep each item short.'
   },
   {
     mode: 'ask',
     label: 'Ask',
-    prompt: 'What should I pay attention to right now?'
+    prompt:
+      'What is the single most useful thing for me to pay attention to right now? Answer in 1-2 short sentences. Do not ask a follow-up unless absolutely necessary.'
   },
   {
     mode: 'recall',
     label: 'Recall',
-    prompt: 'Recall the most relevant thing I should remember right now.'
+    prompt: 'Recall one relevant thing from memory that would be useful right now. Keep it short, concrete, and actionable.'
   },
   {
     mode: 'status',
     label: 'Status',
-    prompt: 'Give me a one sentence system and workflow status check.'
+    prompt: 'Give me a one sentence system status check for the VEGA / LLM Memory stack.'
   }
 ];
