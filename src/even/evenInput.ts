@@ -52,6 +52,10 @@ function mapEvenHubEvent(event: EvenHubEvent): InputEventName | null {
     return 'down';
   }
 
+  if (textEvent && (textType ?? OsEventTypeList.CLICK_EVENT) === OsEventTypeList.CLICK_EVENT) {
+    return 'press';
+  }
+
   if (sysEvent && (sysType ?? OsEventTypeList.CLICK_EVENT) === OsEventTypeList.CLICK_EVENT) {
     return 'press';
   }
