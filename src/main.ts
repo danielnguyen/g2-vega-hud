@@ -43,7 +43,8 @@ async function runSelectedMode(): Promise<void> {
     const response = await sendTurn(config, selected.mode, selected.prompt);
     commit(showPages(state, response));
   } catch (error) {
-    commit(showError(state, error instanceof Error ? error.message : 'Gateway request failed'));
+    console.warn('[gateway]', error);
+    commit(showError(state, toUserErrorMessage(error)));
   }
 }
 
@@ -97,6 +98,26 @@ async function initializeEvenDisplay(): Promise<void> {
   if (evenDisplay) {
     await evenDisplay.render(state);
   }
+}
+
+function toUserErrorMessage(error: unknown): string {
+  if (!(error instanceof Error)) {
+    return 'Gateway request failed.';
+  }
+
+  if (error.message === 'Gateway timed out') {
+    return 'Gateway timed out. Try again.';
+  }
+
+  if (error.message === 'Could not reach gateway') {
+    return 'Could not reach gateway.';
+  }
+
+  if (/^Gateway returned HTTP \d+$/.test(error.message)) {
+    return `${error.message}.`;
+  }
+
+  return 'Gateway request failed.';
 }
 
 bindKeyboardInput(handleInput);

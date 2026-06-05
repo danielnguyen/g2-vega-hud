@@ -1,4 +1,5 @@
 import { waitForEvenAppBridge } from '@evenrealities/even_hub_sdk';
+import { APP_VERSION, ERROR_FOOTER, HOME_FOOTER, LOADING_FOOTER, PAGES_FOOTER } from '../constants';
 import type { AppState } from '../types';
 import { MODES } from '../types';
 
@@ -65,9 +66,9 @@ class EvenGlassesDisplay implements EvenDisplay {
     const page: PageContainerPayload = {
       containerTotalNum: 3,
       textObject: [
-        textContainer(TITLE_ID, 'title', 24, 24, 560, 48, 'VEGA HUD', 0),
+        textContainer(TITLE_ID, 'title', 24, 24, 560, 48, APP_VERSION, 0),
         textContainer(BODY_ID, 'body', 24, 88, 560, 180, 'Ready.', 1),
-        textContainer(HELP_ID, 'help', 24, 286, 560, 32, 'Swipe: move • Tap: select', 0)
+        textContainer(HELP_ID, 'help', 24, 286, 560, 32, HOME_FOOTER, 0)
       ]
     };
 
@@ -91,9 +92,9 @@ class EvenGlassesDisplay implements EvenDisplay {
 function frameForState(state: AppState): Frame {
   if (state.screen === 'home') {
     return {
-      title: 'VEGA HUD',
+      title: APP_VERSION,
       body: MODES.map((item, index) => `${index === state.selectedModeIndex ? '>' : ' '} ${item.label}`).join('\n'),
-      help: 'Swipe: move • Tap: select'
+      help: HOME_FOOTER
     };
   }
 
@@ -103,7 +104,7 @@ function frameForState(state: AppState): Frame {
     return {
       title: selected?.label ?? 'VEGA',
       body: 'Thinking...',
-      help: 'Double tap: cancel'
+      help: LOADING_FOOTER
     };
   }
 
@@ -111,14 +112,14 @@ function frameForState(state: AppState): Frame {
     return {
       title: `${state.response.title} ${state.pageIndex + 1}/${state.response.pages.length}`,
       body: formatForGlasses(state.response.pages[state.pageIndex] ?? ''),
-      help: 'Swipe: page • Tap: home'
+      help: PAGES_FOOTER
     };
   }
 
   return {
     title: 'Gateway error',
     body: formatForGlasses(state.errorMessage ?? 'Unknown error'),
-    help: 'Tap: home'
+    help: ERROR_FOOTER
   };
 }
 
@@ -148,18 +149,33 @@ function textUpgrade(containerID: number, containerName: string, content: string
   return {
     containerID,
     containerName,
-    content
+    content: normalizeForEvenDisplay(content)
   };
 }
 
 function formatForGlasses(value: string): string {
-  const normalized = value.replace(/\s+/g, ' ').trim();
+  const normalized = normalizeForEvenDisplay(value)
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n[ \t]+/g, '\n')
+    .trim();
 
   if (normalized.length <= 220) {
     return normalized;
   }
 
   return `${normalized.slice(0, 217).trim()}...`;
+}
+
+function normalizeForEvenDisplay(value: string): string {
+  return value
+    .replace(/\r\n/g, '\n')
+    .replace(/[\u2018\u2019\u201A\u201B]/g, "'")
+    .replace(/[\u201C\u201D\u201E\u201F]/g, '"')
+    .replace(/[\u2013\u2014]/g, '-')
+    .replace(/\u2026/g, '...')
+    .replace(/[\u2022\u2023\u25E6\u2043\u2219]/g, '-')
+    .replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}]/gu, '')
+    .replace(/[^\x09\x0A\x20-\x7E]/g, '');
 }
 
 async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
