@@ -1,8 +1,8 @@
-import { waitForEvenAppBridge } from '@evenrealities/even_hub_sdk';
+import { OsEventTypeList, waitForEvenAppBridge, type EvenHubEvent } from '@evenrealities/even_hub_sdk';
 import type { InputEventName } from '../input';
 
 type EvenInputBridgeLike = {
-  onEvenHubEvent(callback: (event: unknown) => void): () => void;
+  onEvenHubEvent(callback: (event: EvenHubEvent) => void): () => void;
 };
 
 export async function bindEvenInput(
@@ -12,8 +12,6 @@ export async function bindEvenInput(
   try {
     const bridge = await withTimeout(waitForEvenAppBridge(), timeoutMs);
     const unsubscribe = (bridge as unknown as EvenInputBridgeLike).onEvenHubEvent((event) => {
-      console.debug('EvenHub event:', event);
-
       const mapped = mapEvenHubEvent(event);
       if (mapped) {
         handler(mapped);
@@ -26,51 +24,60 @@ export async function bindEvenInput(
   }
 }
 
-function mapEvenHubEvent(event: unknown): InputEventName | null {
-  const record = asRecord(event);
-  const listEvent = asRecord(record.listEvent);
-  const textEvent = asRecord(record.textEvent);
-  const sysEvent = asRecord(record.sysEvent);
+function mapEvenHubEvent(event: EvenHubEvent): InputEventName | null {
+  const sysEvent = event.sysEvent;
+  const textEvent = event.textEvent;
+  const sysType = sysEvent?.eventType;
+  const textType = textEvent?.eventType;
 
-  const haystack = JSON.stringify({ listEvent, textEvent, sysEvent }).toLowerCase();
+  console.debug('[even-input]', {
+    sysType: sysType ?? null,
+    textType: textType ?? null,
+    event
+  });
 
-  if (containsAny(haystack, ['double', 'dbl', 'two_click', 'twoclick'])) {
+  if (sysType === OsEventTypeList.DOUBLE_CLICK_EVENT) {
     return 'doublePress';
   }
 
-  if (containsAny(haystack, ['swipeup', 'swipe_up', 'slideup', 'slide_up', 'up', 'previous', 'prev'])) {
+  if (textType === OsEventTypeList.DOUBLE_CLICK_EVENT) {
+    return 'doublePress';
+  }
+
+  if (textType === OsEventTypeList.SCROLL_TOP_EVENT) {
     return 'up';
   }
 
-  if (containsAny(haystack, ['swipedown', 'swipe_down', 'slidedown', 'slide_down', 'down', 'next'])) {
+  if (textType === OsEventTypeList.SCROLL_BOTTOM_EVENT) {
     return 'down';
   }
 
-  if (containsAny(haystack, ['single', 'click', 'tap', 'press', 'select', 'confirm', 'enter'])) {
+  if (textEvent && (textType ?? OsEventTypeList.CLICK_EVENT) === OsEventTypeList.CLICK_EVENT) {
     return 'press';
   }
 
-  if (listEvent.currentSelectItemName || listEvent.currentSelectIndex !== undefined) {
+  if (sysEvent && (sysType ?? OsEventTypeList.CLICK_EVENT) === OsEventTypeList.CLICK_EVENT) {
     return 'press';
   }
 
-  if (Object.keys(textEvent).length > 0) {
-    return 'press';
+  if (isLifecycleEvent(sysType) || isLifecycleEvent(textType)) {
+    console.debug('[even-input] lifecycle', {
+      sysType: sysType ?? null,
+      textType: textType ?? null,
+      event
+    });
   }
 
   return null;
 }
 
-function asRecord(value: unknown): Record<string, unknown> {
-  if (typeof value === 'object' && value !== null) {
-    return value as Record<string, unknown>;
-  }
-
-  return {};
-}
-
-function containsAny(value: string, needles: string[]): boolean {
-  return needles.some((needle) => value.includes(needle));
+function isLifecycleEvent(eventType: OsEventTypeList | undefined): boolean {
+  return (
+    eventType === OsEventTypeList.FOREGROUND_ENTER_EVENT ||
+    eventType === OsEventTypeList.FOREGROUND_EXIT_EVENT ||
+    eventType === OsEventTypeList.ABNORMAL_EXIT_EVENT ||
+    eventType === OsEventTypeList.SYSTEM_EXIT_EVENT
+  );
 }
 
 async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
