@@ -1,6 +1,8 @@
 # app config
 app.json
+app.*.json
 !app.json.example
+*.ehpk
 
 # Logs
 logs
