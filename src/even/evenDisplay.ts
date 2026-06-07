@@ -1,5 +1,13 @@
 import { waitForEvenAppBridge } from '@evenrealities/even_hub_sdk';
-import { APP_VERSION, ERROR_FOOTER, HOME_FOOTER, LOADING_FOOTER, PAGES_FOOTER } from '../constants';
+import {
+  APP_VERSION,
+  ERROR_FOOTER,
+  HOME_FOOTER,
+  LOADING_FOOTER,
+  PAGES_FOOTER,
+  SETTINGS_FOOTER,
+  SETTINGS_REQUIRED_FOOTER
+} from '../constants';
 import type { AppState } from '../types';
 import { MODES } from '../types';
 
@@ -90,6 +98,14 @@ class EvenGlassesDisplay implements EvenDisplay {
 }
 
 function frameForState(state: AppState): Frame {
+  if (state.screen === 'settings') {
+    return {
+      title: APP_VERSION,
+      body: 'Configure in phone app',
+      help: state.settingsRequired ? SETTINGS_REQUIRED_FOOTER : SETTINGS_FOOTER
+    };
+  }
+
   if (state.screen === 'home') {
     return {
       title: APP_VERSION,

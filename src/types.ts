@@ -1,6 +1,8 @@
+import type { RuntimeSettings } from './settings';
+
 export type Mode = 'brief' | 'ask' | 'recall' | 'status';
 
-export type Screen = 'home' | 'loading' | 'pages' | 'error';
+export type Screen = 'home' | 'loading' | 'pages' | 'error' | 'settings';
 
 export type GatewayPageResponse = {
   request_id: string;
@@ -18,6 +20,9 @@ export type AppState = {
   pageIndex: number;
   response: GatewayPageResponse | null;
   errorMessage: string | null;
+  settingsDraft: RuntimeSettings;
+  settingsStatus: string | null;
+  settingsRequired: boolean;
 };
 
 export const MODES: Array<{ mode: Mode; label: string; prompt: string }> = [
