@@ -53,6 +53,11 @@ p {
   font-size: 18px;
 }
 
+input,
+button {
+  font: inherit;
+}
+
 .mode-list {
   display: grid;
   gap: 8px;
@@ -76,8 +81,58 @@ p {
   font-weight: 700;
 }
 
+.settings-link,
+.action-button {
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.08);
+  color: inherit;
+  padding: 10px 12px;
+}
+
+.settings-link {
+  margin-top: 8px;
+}
+
+.settings-form {
+  display: grid;
+  gap: 12px;
+}
+
+.settings-field {
+  display: grid;
+  gap: 6px;
+  font-size: 14px;
+}
+
+.settings-field input {
+  width: 100%;
+  padding: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.28);
+  color: inherit;
+}
+
+.settings-actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.settings-status {
+  font-size: 15px;
+  line-height: 1.35;
+}
+
 footer {
   margin-top: 16px;
   font-size: 13px;
   opacity: 0.64;
+}
+
+@media (max-width: 480px) {
+  .settings-actions {
+    grid-template-columns: 1fr;
+  }
 }

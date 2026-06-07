@@ -1,6 +1,6 @@
 # g2-vega-hud
 
-VEGA HUD v0.2 is an Even Realities G2 heads-up client for VEGA.
+VEGA HUD v0.3 is an Even Realities G2 heads-up client for VEGA.
 
 This app is a thin wearable surface. It sends short mode-based requests to `g2-gateway`, then renders the returned `pages[]` response.
 
@@ -38,6 +38,12 @@ VITE_GATEWAY_URL=https://your-gateway-host.example
 VITE_AUTH_VALUE=replace-with-narrow-gateway-token
 ```
 
+Runtime precedence is:
+
+1. Saved runtime settings from the phone app
+2. `VITE_GATEWAY_URL` and `VITE_AUTH_VALUE`
+3. Unconfigured state that requires phone-side setup
+
 Do not commit `.env`.
 
 ## Browser controls for local dev
@@ -68,6 +74,23 @@ Scan the QR code from the Even Realities app.
 ## Manifest
 
 Update `app.json` before device testing so the network whitelist matches your gateway host.
+
+## Runtime settings for packaged installs
+
+Packaged `.ehpk` installs should be configured from the phone UI after install. The app stores:
+
+- `gatewayUrl`
+- `authValue`
+
+When the Even bridge is available, settings are stored in Even local storage. In normal browser development, the app falls back to `window.localStorage`.
+
+Gateway URL format example:
+
+```text
+https://gateway.example.com
+```
+
+Use only a narrow `g2-gateway` token here. Do not put Cloudflare Access service tokens, backend API keys, chat-orchestrator keys, or other privileged secrets into the phone settings screen.
 
 ## Security
 
