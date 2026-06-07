@@ -91,10 +91,10 @@ Use `npm run pack` for Even Hub uploads. It automatically:
 
 1. Fails fast if `app.json` is missing and tells you to copy `app.json.example`.
 2. Increments the patch version in your local `app.json` and the other app manifest variants.
-3. Keeps `src/constants.ts` aligned by displaying only the manifest major/minor as `VEGA HUD vX.Y` for stale-bundle detection.
+3. Keeps the visible app version generated from the synced package and manifest version.
 4. Builds with `VITE_DISABLE_ENV_CONFIG=1` and creates `vega-hud.ehpk`.
 
-Example: `0.3.0` becomes `0.3.1`, while `APP_VERSION` remains `VEGA HUD v0.3`.
+Example: `0.3.0` becomes `0.3.1`, and the visible app version displays `VEGA HUD v0.3.1`.
 
 If `app.json` is missing, packaging stops with:
 
