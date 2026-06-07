@@ -7,9 +7,12 @@
   "scripts": {
     "dev": "vite --host 0.0.0.0",
     "build": "tsc && vite build",
+    "build:packaged": "VITE_DISABLE_ENV_CONFIG=1 tsc && vite build",
+    "pack": "npm run version:even && npm run build:packaged && evenhub pack app.json ./dist --output vega-hud.ehpk",
     "preview": "vite preview --host 0.0.0.0",
     "simulator": "evenhub-simulator http://localhost:5173",
-    "qr": "evenhub qr --url"
+    "qr": "evenhub qr --port 5173",
+    "version:even": "node scripts/bump-even-version.mjs"
   },
   "engines": {
     "node": ">=22"

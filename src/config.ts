@@ -18,6 +18,12 @@ export async function loadConfig(): Promise<AppConfig | null> {
 }
 
 export function loadEnvConfig(): AppConfig | null {
+  const disableEnvConfig = (import.meta.env.VITE_DISABLE_ENV_CONFIG as string | undefined)?.toLowerCase();
+
+  if (disableEnvConfig === '1' || disableEnvConfig === 'true') {
+    return null;
+  }
+
   const gatewayUrl = import.meta.env.VITE_GATEWAY_URL as string | undefined;
   const authValue = import.meta.env.VITE_AUTH_VALUE as string | undefined;
 
