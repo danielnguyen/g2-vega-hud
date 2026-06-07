@@ -2,7 +2,7 @@
 
 VEGA HUD v0.3 is an Even Realities G2 heads-up client for VEGA.
 
-This app is a thin wearable surface. It sends short mode-based requests to `g2-gateway`, then renders the returned `pages[]` response.
+This app keeps the glasses as the primary HUD surface while the phone app becomes the configuration and runtime status surface. It sends short mode-based requests to `g2-gateway`, then renders the returned `pages[]` response.
 
 ## Architecture
 
@@ -22,6 +22,8 @@ Ask
 Recall
 Status
 ```
+
+Mode buttons remain available on the phone for debug and manual control, but the primary HUD remains on the glasses.
 
 ## Local setup
 
@@ -90,8 +92,10 @@ Gateway URL format example:
 https://gateway.example.com
 ```
 
-Use only a narrow `g2-gateway` token here. Do not put Cloudflare Access service tokens, backend API keys, chat-orchestrator keys, or other privileged secrets into the phone settings screen.
+Use only a narrow `g2-gateway` token here. The phone app can also run a `Test Connection` health check against the configured gateway/token pair.
+
+Do not put Cloudflare Access service tokens, backend API keys, chat-orchestrator keys, basic-memory-store keys, or other privileged secrets into the phone settings screen.
 
 ## Security
 
-This is a client-side app. Anything placed in `VITE_*` variables is visible to the app. Do not put Cloudflare Access service-token secrets, chat-orchestrator API keys, basic-memory-store keys, or other privileged secrets here.
+This is a client-side app. Anything placed in `VITE_*` variables is visible to the app. Do not put Cloudflare Access service tokens, Cloudflare Access service-token secrets, backend API keys, chat-orchestrator API keys, basic-memory-store keys, or other privileged secrets here.

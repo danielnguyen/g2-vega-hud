@@ -48,6 +48,14 @@ h1 {
   letter-spacing: 0.04em;
 }
 
+h2 {
+  margin: 0 0 10px;
+  font-size: 14px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  opacity: 0.72;
+}
+
 p {
   margin: 0 0 16px;
   font-size: 18px;
@@ -91,7 +99,7 @@ button {
 }
 
 .settings-link {
-  margin-top: 8px;
+  margin: 8px 0 16px;
 }
 
 .settings-form {
@@ -123,6 +131,32 @@ button {
 .settings-status {
   font-size: 15px;
   line-height: 1.35;
+}
+
+.status-panel {
+  margin: 0 0 16px;
+  padding: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.status-panel-detailed {
+  margin-bottom: 18px;
+}
+
+.status-row {
+  margin: 0 0 8px;
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+.status-row:last-child {
+  margin-bottom: 0;
+}
+
+.status-row-warning {
+  color: #ffb3b3;
 }
 
 footer {

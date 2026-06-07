@@ -1,14 +1,20 @@
+import type { RuntimeStatus } from './runtimeStatus';
 import type { RuntimeSettings } from './settings';
 import type { AppState, GatewayPageResponse } from './types';
 import { MODES } from './types';
 
-export function initialState(configured: boolean, settingsDraft: RuntimeSettings): AppState {
+export function initialState(
+  configured: boolean,
+  settingsDraft: RuntimeSettings,
+  runtimeStatus: RuntimeStatus
+): AppState {
   return {
     screen: configured ? 'home' : 'settings',
     selectedModeIndex: 0,
     pageIndex: 0,
     response: null,
     errorMessage: null,
+    runtimeStatus,
     settingsDraft,
     settingsStatus: configured ? null : 'Settings required before use.',
     settingsRequired: !configured
@@ -67,7 +73,8 @@ export function applyConfig(
   state: AppState,
   settingsDraft: RuntimeSettings,
   configured: boolean,
-  status: string | null
+  status: string | null,
+  runtimeStatus: RuntimeStatus
 ): AppState {
   return {
     ...state,
@@ -75,6 +82,7 @@ export function applyConfig(
     response: null,
     errorMessage: null,
     pageIndex: 0,
+    runtimeStatus,
     settingsDraft,
     settingsStatus: status,
     settingsRequired: !configured
