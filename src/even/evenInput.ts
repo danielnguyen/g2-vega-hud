@@ -129,7 +129,7 @@ function eventTypeLabel(eventType: OsEventTypeList | undefined): string {
     case OsEventTypeList.IMU_DATA_REPORT:
       return 'IMU_DATA_REPORT';
     default:
-      return 'UNKNOWN_EVENT';
+      return `UNKNOWN_EVENT(${eventType ?? 'null'})`;
   }
 }
 

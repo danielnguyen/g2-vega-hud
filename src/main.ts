@@ -30,6 +30,7 @@ import './style.css';
 
 const CONNECTION_TEST_PROMPT = 'Give me a one sentence system status check for the VEGA / LLM Memory stack.';
 const GLASSES_HELLO_PROMPT = 'Say hello from VEGA HUD';
+const EMPTY_RESPONSE_MESSAGE = 'Gateway returned no renderable pages.';
 
 const root = document.querySelector<HTMLDivElement>('#app');
 
@@ -179,6 +180,10 @@ function toUserErrorMessage(error: unknown): string {
     return 'Could not reach gateway.';
   }
 
+  if (error.message === EMPTY_RESPONSE_MESSAGE) {
+    return EMPTY_RESPONSE_MESSAGE;
+  }
+
   if (/^Gateway returned HTTP \d+$/.test(error.message)) {
     return `${error.message}.`;
   }
@@ -319,6 +324,10 @@ async function handleTestConnection(): Promise<void> {
 }
 
 async function runHelloFromGlasses(): Promise<void> {
+  if (isGatewayRequestPending()) {
+    return;
+  }
+
   await runGatewayTurn('glasses-hello', 'ask', GLASSES_HELLO_PROMPT);
 }
 
@@ -352,6 +361,11 @@ async function runGatewayTurn(label: string, mode: Mode, text: string): Promise<
 
   try {
     const response = await sendTurn(config, mode, text);
+
+    if (!hasRenderablePages(response.pages)) {
+      throw new Error(EMPTY_RESPONSE_MESSAGE);
+    }
+
     commit({
       ...showPages(state, response),
       runtimeStatus: markRequestSuccess(state.runtimeStatus, mode, response.status ?? 'ok'),
@@ -419,6 +433,14 @@ function buildDebugState(currentSettings: RuntimeSettings): DebugState {
     lastGatewayRequest: null,
     lastError: null
   };
+}
+
+function isGatewayRequestPending(): boolean {
+  return state.debug.lastGatewayRequest?.status === 'pending';
+}
+
+function hasRenderablePages(pages: string[]): boolean {
+  return pages.some((page) => page.trim().length > 0);
 }
 
 function withCurrentSettings(nextState: AppState, currentSettings: RuntimeSettings): AppState {
