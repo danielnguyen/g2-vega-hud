@@ -1,3 +1,4 @@
+import type { InputEventName } from './input';
 import type { RuntimeStatus } from './runtimeStatus';
 import type { RuntimeSettings } from './settings';
 
@@ -15,6 +16,31 @@ export type GatewayPageResponse = {
   raw_length: number;
 };
 
+export type GatewayRequestDebug = {
+  label: string;
+  mode: Mode;
+  status: 'pending' | 'ok' | 'degraded' | 'failed';
+  updatedAt: string;
+};
+
+export type GlassesInputDebugEvent = {
+  timestamp: string;
+  channel: 'textEvent' | 'sysEvent' | 'unknown';
+  eventType: string;
+  mappedAction: InputEventName | null;
+  eventSource: string | null;
+  target: string | null;
+  summary: string;
+};
+
+export type DebugState = {
+  appVersion: string;
+  currentSettings: RuntimeSettings;
+  lastGlassesInputEvent: GlassesInputDebugEvent | null;
+  lastGatewayRequest: GatewayRequestDebug | null;
+  lastError: string | null;
+};
+
 export type AppState = {
   screen: Screen;
   selectedModeIndex: number;
@@ -25,6 +51,7 @@ export type AppState = {
   settingsDraft: RuntimeSettings;
   settingsStatus: string | null;
   settingsRequired: boolean;
+  debug: DebugState;
 };
 
 export const MODES: Array<{ mode: Mode; label: string; prompt: string }> = [

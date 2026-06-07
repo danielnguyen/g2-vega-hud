@@ -1,12 +1,11 @@
 import {
-  APP_VERSION,
   ERROR_FOOTER,
   HOME_FOOTER,
   LOADING_FOOTER,
   PAGES_FOOTER
 } from './constants';
 import type { RuntimeStatus } from './runtimeStatus';
-import type { AppState } from './types';
+import type { AppState, GatewayRequestDebug, GlassesInputDebugEvent } from './types';
 import { MODES } from './types';
 
 export function render(root: HTMLElement, state: AppState): void {
@@ -42,8 +41,9 @@ function renderFrame(state: AppState): HTMLElement {
 function renderHome(state: AppState): HTMLElement {
   const section = document.createElement('section');
   section.className = 'screen';
-  section.appendChild(title(APP_VERSION));
+  section.appendChild(title(state.debug.appVersion));
   section.appendChild(renderRuntimeStatus(state.runtimeStatus, false));
+  section.appendChild(renderDebugPanel(state));
   section.appendChild(renderSettingsLink('Open Settings'));
   section.appendChild(subtitle('Debug / Manual Controls'));
 
@@ -104,6 +104,7 @@ function renderSettings(state: AppState): HTMLElement {
   section.className = 'screen';
   section.appendChild(title('Settings'));
   section.appendChild(renderRuntimeStatus(state.runtimeStatus, true));
+  section.appendChild(renderDebugPanel(state));
 
   const form = document.createElement('form');
   form.className = 'settings-form';
@@ -138,6 +139,19 @@ function renderSettings(state: AppState): HTMLElement {
   }
 
   section.appendChild(help(state.settingsRequired ? 'Save settings to continue.' : 'Settings are stored on device when available.'));
+  return section;
+}
+
+function renderDebugPanel(state: AppState): HTMLElement {
+  const section = document.createElement('section');
+  section.className = 'debug-panel';
+  section.appendChild(subtitle('Debug'));
+  section.appendChild(renderStatusRow('App version', state.debug.appVersion));
+  section.appendChild(renderStatusRow('Gateway URL', state.debug.currentSettings.gatewayUrl || 'Not configured'));
+  section.appendChild(renderStatusRow('Auth token', redactAuthValue(state.debug.currentSettings.authValue)));
+  section.appendChild(renderStatusRow('Last input', formatGlassesInput(state.debug.lastGlassesInputEvent)));
+  section.appendChild(renderStatusRow('Last request', formatGatewayRequest(state.debug.lastGatewayRequest)));
+  section.appendChild(renderStatusRow('Last error', state.debug.lastError ?? 'None', state.debug.lastError ? 'warning' : 'default'));
   return section;
 }
 
@@ -195,6 +209,34 @@ function connectionLabel(connected: boolean | null): string {
   }
 
   return 'Unknown';
+}
+
+function formatGlassesInput(event: GlassesInputDebugEvent | null): string {
+  if (!event) {
+    return 'None';
+  }
+
+  return `${event.summary} • ${formatTimestamp(event.timestamp)}`;
+}
+
+function formatGatewayRequest(request: GatewayRequestDebug | null): string {
+  if (!request) {
+    return 'None';
+  }
+
+  return `${request.label} / ${request.mode} / ${request.status} / ${formatTimestamp(request.updatedAt)}`;
+}
+
+function redactAuthValue(value: string): string {
+  if (!value) {
+    return 'Not configured';
+  }
+
+  if (value.length <= 6) {
+    return '***';
+  }
+
+  return `${value.slice(0, 3)}...${value.slice(-2)}`;
 }
 
 function formatTimestamp(value: string): string {
