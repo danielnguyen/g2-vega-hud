@@ -2,7 +2,6 @@ import { readFile, readdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 const SEMVER_RE = /^(\d+)\.(\d+)\.(\d+)$/;
-const APP_VERSION_RE = /^export const APP_VERSION = 'VEGA HUD v\d+\.\d+';$/m;
 
 async function main() {
   const rootDir = process.cwd();
@@ -12,29 +11,29 @@ async function main() {
     throw new Error('No app manifest files found. Expected app.json and/or app.*.json.');
   }
 
+  const packageData = await readPackageJson(rootDir);
+  const packageVersion = packageData.version;
+  const sourceVersion = parseVersion(packageVersion, 'package.json');
   const manifests = await Promise.all(manifestFiles.map((file) => readManifest(rootDir, file)));
-  const sourceManifest = manifests.find((manifest) => manifest.file === 'app.json') ?? manifests[0];
-  const sourceVersion = parseVersion(sourceManifest.version, sourceManifest.file);
-  const mismatched = manifests.filter((manifest) => manifest.version !== sourceManifest.version);
+  const mismatched = manifests.filter((manifest) => manifest.version !== packageVersion);
 
   if (mismatched.length > 0) {
-    const details = manifests.map((manifest) => `${manifest.file}: ${manifest.version}`).join(', ');
-    throw new Error(`App manifest versions differ before bumping. Align them first. ${details}`);
+    const details = [`package.json: ${packageVersion}`, ...manifests.map((manifest) => `${manifest.file}: ${manifest.version}`)].join(', ');
+    throw new Error(`Version files differ before bumping. Align them first. ${details}`);
   }
 
   const nextVersion = `${sourceVersion.major}.${sourceVersion.minor}.${sourceVersion.patch + 1}`;
-  const nextAppVersionLine = buildAppVersionLine(sourceVersion.major, sourceVersion.minor);
-  await assertConstantsLine(rootDir);
+  await writePackageJson(rootDir, packageData, nextVersion);
+  await updatePackageLock(rootDir, nextVersion);
   await Promise.all(manifests.map((manifest) => writeManifest(rootDir, manifest.file, manifest.data, nextVersion)));
-  await updateConstants(rootDir, nextAppVersionLine);
 
-  console.log(`Even Hub manifest version bumped: ${sourceManifest.version} -> ${nextVersion}`);
-  console.log(`APP_VERSION synced to VEGA HUD v${sourceVersion.major}.${sourceVersion.minor}`);
+  console.log(`Version bumped: ${packageVersion} -> ${nextVersion}`);
+  console.log(`Synced package.json, package-lock.json, and ${manifestFiles.join(', ')}`);
 }
 
 async function findManifestFiles(rootDir) {
   const entries = await readdir(rootDir, { withFileTypes: true });
-  const files = entries
+  return entries
     .filter((entry) => entry.isFile())
     .map((entry) => entry.name)
     .filter((name) => name === 'app.json' || /^app\..*\.json$/.test(name) || name === 'app.json.example')
@@ -43,8 +42,43 @@ async function findManifestFiles(rootDir) {
       if (right === 'app.json') return 1;
       return left.localeCompare(right);
     });
+}
 
-  return [...new Set(files)];
+async function readPackageJson(rootDir) {
+  const fullPath = path.join(rootDir, 'package.json');
+  const raw = await readFile(fullPath, 'utf8');
+  const data = JSON.parse(raw);
+
+  if (typeof data.version !== 'string') {
+    throw new Error('package.json is missing a string version field.');
+  }
+
+  parseVersion(data.version, 'package.json');
+  return data;
+}
+
+async function writePackageJson(rootDir, data, nextVersion) {
+  const fullPath = path.join(rootDir, 'package.json');
+  const nextData = { ...data, version: nextVersion };
+  await writeFile(fullPath, `${JSON.stringify(nextData, null, 2)}\n`, 'utf8');
+}
+
+async function updatePackageLock(rootDir, nextVersion) {
+  const lockPath = path.join(rootDir, 'package-lock.json');
+  const raw = await readFile(lockPath, 'utf8');
+  const data = JSON.parse(raw);
+
+  if (typeof data.version !== 'string') {
+    throw new Error('package-lock.json is missing a string version field.');
+  }
+
+  data.version = nextVersion;
+
+  if (data.packages && data.packages['']) {
+    data.packages[''].version = nextVersion;
+  }
+
+  await writeFile(lockPath, `${JSON.stringify(data, null, 2)}\n`, 'utf8');
 }
 
 async function readManifest(rootDir, file) {
@@ -77,26 +111,6 @@ async function writeManifest(rootDir, file, data, nextVersion) {
   const fullPath = path.join(rootDir, file);
   const nextData = { ...data, version: nextVersion };
   await writeFile(fullPath, `${JSON.stringify(nextData, null, 2)}\n`, 'utf8');
-}
-
-function buildAppVersionLine(major, minor) {
-  return `export const APP_VERSION = 'VEGA HUD v${major}.${minor}';`;
-}
-
-async function assertConstantsLine(rootDir) {
-  const constantsPath = path.join(rootDir, 'src', 'constants.ts');
-  const raw = await readFile(constantsPath, 'utf8');
-
-  if (!APP_VERSION_RE.test(raw)) {
-    throw new Error(`Expected APP_VERSION export not found in ${constantsPath}.`);
-  }
-}
-
-async function updateConstants(rootDir, nextLine) {
-  const constantsPath = path.join(rootDir, 'src', 'constants.ts');
-  const raw = await readFile(constantsPath, 'utf8');
-  const nextRaw = raw.replace(APP_VERSION_RE, nextLine);
-  await writeFile(constantsPath, nextRaw, 'utf8');
 }
 
 main().catch((error) => {

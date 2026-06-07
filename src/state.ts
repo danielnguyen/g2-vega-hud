@@ -1,12 +1,13 @@
 import type { RuntimeStatus } from './runtimeStatus';
 import type { RuntimeSettings } from './settings';
-import type { AppState, GatewayPageResponse } from './types';
+import type { AppState, DebugState, GatewayPageResponse } from './types';
 import { MODES } from './types';
 
 export function initialState(
   configured: boolean,
   settingsDraft: RuntimeSettings,
-  runtimeStatus: RuntimeStatus
+  runtimeStatus: RuntimeStatus,
+  debug: DebugState
 ): AppState {
   return {
     screen: configured ? 'home' : 'settings',
@@ -17,7 +18,8 @@ export function initialState(
     runtimeStatus,
     settingsDraft,
     settingsStatus: configured ? null : 'Settings required before use.',
-    settingsRequired: !configured
+    settingsRequired: !configured,
+    debug
   };
 }
 

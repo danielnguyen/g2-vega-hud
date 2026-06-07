@@ -1,6 +1,5 @@
 import { waitForEvenAppBridge } from '@evenrealities/even_hub_sdk';
 import {
-  APP_VERSION,
   ERROR_FOOTER,
   HOME_FOOTER,
   LOADING_FOOTER,
@@ -10,6 +9,7 @@ import {
 } from '../constants';
 import type { AppState } from '../types';
 import { MODES } from '../types';
+import { APP_VERSION } from '../version';
 
 const TITLE_ID = 1;
 const BODY_ID = 2;
@@ -100,7 +100,7 @@ class EvenGlassesDisplay implements EvenDisplay {
 function frameForState(state: AppState): Frame {
   if (state.screen === 'settings') {
     return {
-      title: APP_VERSION,
+      title: state.debug.appVersion,
       body: settingsBody(state),
       help: state.settingsRequired ? SETTINGS_REQUIRED_FOOTER : SETTINGS_FOOTER
     };
@@ -108,7 +108,7 @@ function frameForState(state: AppState): Frame {
 
   if (state.screen === 'home') {
     return {
-      title: APP_VERSION,
+      title: state.debug.appVersion,
       body: MODES.map((item, index) => `${index === state.selectedModeIndex ? '>' : ' '} ${item.label}`).join('\n'),
       help: HOME_FOOTER
     };

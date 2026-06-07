@@ -1,6 +1,6 @@
 import { configFromSettings, loadConfig, loadEnvConfig, type AppConfig } from './config';
 import { createEvenDisplay, type EvenDisplay } from './even/evenDisplay';
-import { bindEvenInput } from './even/evenInput';
+import { bindEvenInput, type NormalizedEvenInputEvent } from './even/evenInput';
 import { sendTurn } from './gatewayClient';
 import { bindKeyboardInput, type InputEventName } from './input';
 import { render } from './renderer';
@@ -24,10 +24,13 @@ import {
   showLoading,
   showPages
 } from './state';
-import { MODES, type AppState } from './types';
+import { MODES, type AppState, type DebugState, type Mode } from './types';
+import { APP_VERSION } from './version';
 import './style.css';
 
 const CONNECTION_TEST_PROMPT = 'Give me a one sentence system status check for the VEGA / LLM Memory stack.';
+const GLASSES_HELLO_PROMPT = 'Say hello from VEGA HUD';
+const EMPTY_RESPONSE_MESSAGE = 'Gateway returned no renderable pages.';
 
 const root = document.querySelector<HTMLDivElement>('#app');
 
@@ -37,7 +40,7 @@ if (!root) {
 
 const appRoot: HTMLDivElement = root;
 
-let state: AppState = initialState(false, emptySettings(), initialRuntimeStatus(false));
+let state: AppState = initialState(false, emptySettings(), initialRuntimeStatus(false), buildDebugState(emptySettings()));
 let evenDisplay: EvenDisplay | null = null;
 let config: AppConfig | null = null;
 
@@ -55,37 +58,11 @@ function commit(nextState: AppState): void {
 async function runSelectedMode(): Promise<void> {
   const selected = MODES[state.selectedModeIndex];
   if (!selected) {
-    commit(showError(state, 'No mode selected'));
+    commit(withDebugError(showError(state, 'No mode selected'), 'No mode selected'));
     return;
   }
 
-  if (!config) {
-    commit({
-      ...openSettings(state, state.settingsDraft, 'Settings required before use.'),
-      runtimeStatus: markConfigured(state.runtimeStatus, false)
-    });
-    return;
-  }
-
-  commit({
-    ...showLoading(state),
-    runtimeStatus: markRequestStart(state.runtimeStatus, selected.mode)
-  });
-
-  try {
-    const response = await sendTurn(config, selected.mode, selected.prompt);
-    commit({
-      ...showPages(state, response),
-      runtimeStatus: markRequestSuccess(state.runtimeStatus, selected.mode, response.status ?? 'ok')
-    });
-  } catch (error) {
-    console.warn('[gateway]', error);
-    const message = toUserErrorMessage(error);
-    commit({
-      ...showError(state, message),
-      runtimeStatus: markRequestFailure(state.runtimeStatus, selected.mode, message)
-    });
-  }
+  await runGatewayTurn(selected.label, selected.mode, selected.prompt);
 }
 
 function bindModeClicks(): void {
@@ -147,6 +124,7 @@ function handleInput(eventName: InputEventName): void {
     if (eventName === 'up') commit(moveSelection(state, -1));
     if (eventName === 'down') commit(moveSelection(state, 1));
     if (eventName === 'press') void runSelectedMode();
+    if (eventName === 'doublePress') void runHelloFromGlasses();
     return;
   }
 
@@ -164,6 +142,23 @@ function handleInput(eventName: InputEventName): void {
 
   if (state.screen === 'error' && (eventName === 'press' || eventName === 'doublePress')) {
     commit(backHome(state));
+  }
+}
+
+function handleEvenInput(event: NormalizedEvenInputEvent): void {
+  const settingsDraft = state.screen === 'settings' ? currentDraft() : state.settingsDraft;
+
+  commit({
+    ...state,
+    settingsDraft,
+    debug: {
+      ...state.debug,
+      lastGlassesInputEvent: event
+    }
+  });
+
+  if (event.mappedAction) {
+    handleInput(event.mappedAction);
   }
 }
 
@@ -188,6 +183,10 @@ function toUserErrorMessage(error: unknown): string {
     return 'Could not reach gateway.';
   }
 
+  if (error.message === EMPTY_RESPONSE_MESSAGE) {
+    return EMPTY_RESPONSE_MESSAGE;
+  }
+
   if (/^Gateway returned HTTP \d+$/.test(error.message)) {
     return `${error.message}.`;
   }
@@ -203,7 +202,7 @@ async function bootstrap(): Promise<void> {
     : emptySettings(envFallback ?? undefined);
   const configured = Boolean(config);
 
-  commit(initialState(configured, settingsDraft, initialRuntimeStatus(configured)));
+  commit(initialState(configured, settingsDraft, initialRuntimeStatus(configured), buildDebugState(settingsDraft)));
 }
 
 async function handleSaveSettings(): Promise<void> {
@@ -218,12 +217,15 @@ async function handleSaveSettings(): Promise<void> {
   await saveSettings(draft);
   config = nextConfig;
   commit(
-    applyConfig(
-      state,
-      draft,
-      true,
-      'Settings saved.',
-      markConfigured(state.runtimeStatus, true)
+    withCurrentSettings(
+      applyConfig(
+        state,
+        draft,
+        true,
+        'Settings saved.',
+        markConfigured(state.runtimeStatus, true)
+      ),
+      draft
     )
   );
 }
@@ -235,25 +237,32 @@ async function handleClearSettings(): Promise<void> {
   config = fallbackConfig;
 
   if (fallbackConfig) {
+    const fallbackSettings = { gatewayUrl: fallbackConfig.gatewayUrl, authValue: fallbackConfig.authValue };
     commit(
-      applyConfig(
-        state,
-        { gatewayUrl: fallbackConfig.gatewayUrl, authValue: fallbackConfig.authValue },
-        true,
-        'Saved settings cleared. Using env fallback.',
-        markConfigured(state.runtimeStatus, true)
+      withCurrentSettings(
+        applyConfig(
+          state,
+          fallbackSettings,
+          true,
+          'Saved settings cleared. Using env fallback.',
+          markConfigured(state.runtimeStatus, true)
+        ),
+        fallbackSettings
       )
     );
     return;
   }
 
   commit(
-    applyConfig(
-      state,
-      emptySettings(),
-      false,
-      'Saved settings cleared. Settings required before use.',
-      markConfigured(state.runtimeStatus, false)
+    withCurrentSettings(
+      applyConfig(
+        state,
+        emptySettings(),
+        false,
+        'Saved settings cleared. Settings required before use.',
+        markConfigured(state.runtimeStatus, false)
+      ),
+      emptySettings()
     )
   );
 }
@@ -269,20 +278,127 @@ async function handleTestConnection(): Promise<void> {
 
   commit({
     ...openSettings(state, draft, 'Testing connection...'),
-    runtimeStatus: markConnectionCheck(state.runtimeStatus, 'start')
+    runtimeStatus: markConnectionCheck(state.runtimeStatus, 'start'),
+    debug: {
+      ...state.debug,
+      lastGatewayRequest: {
+        label: 'connection-test',
+        mode: 'status',
+        status: 'pending',
+        updatedAt: new Date().toISOString()
+      },
+      lastError: null
+    }
   });
 
   try {
     const response = await sendTurn(nextConfig, 'status', CONNECTION_TEST_PROMPT);
     commit({
       ...openSettings(state, draft, 'Connection ok.'),
-      runtimeStatus: markConnectionCheck(state.runtimeStatus, 'success', response.status ?? 'ok')
+      runtimeStatus: markConnectionCheck(state.runtimeStatus, 'success', response.status ?? 'ok'),
+      debug: {
+        ...state.debug,
+        lastGatewayRequest: {
+          label: 'connection-test',
+          mode: 'status',
+          status: response.status ?? 'ok',
+          updatedAt: new Date().toISOString()
+        },
+        lastError: null
+      }
     });
   } catch (error) {
     const message = toUserErrorMessage(error);
     commit({
       ...openSettings(state, draft, message),
-      runtimeStatus: markConnectionCheck(state.runtimeStatus, 'failure', 'failed', message)
+      runtimeStatus: markConnectionCheck(state.runtimeStatus, 'failure', 'failed', message),
+      debug: {
+        ...state.debug,
+        lastGatewayRequest: {
+          label: 'connection-test',
+          mode: 'status',
+          status: 'failed',
+          updatedAt: new Date().toISOString()
+        },
+        lastError: message
+      }
+    });
+  }
+}
+
+async function runHelloFromGlasses(): Promise<void> {
+  if (isGatewayRequestPending()) {
+    return;
+  }
+
+  await runGatewayTurn('glasses-hello', 'ask', GLASSES_HELLO_PROMPT);
+}
+
+async function runGatewayTurn(label: string, mode: Mode, text: string): Promise<void> {
+  if (!config) {
+    commit({
+      ...openSettings(state, state.settingsDraft, 'Settings required before use.'),
+      runtimeStatus: markConfigured(state.runtimeStatus, false),
+      debug: {
+        ...state.debug,
+        lastError: 'Settings required before use.'
+      }
+    });
+    return;
+  }
+
+  commit({
+    ...showLoading(state),
+    runtimeStatus: markRequestStart(state.runtimeStatus, mode),
+    debug: {
+      ...state.debug,
+      lastGatewayRequest: {
+        label,
+        mode,
+        status: 'pending',
+        updatedAt: new Date().toISOString()
+      },
+      lastError: null
+    }
+  });
+
+  try {
+    const response = await sendTurn(config, mode, text);
+
+    if (!hasRenderablePages(response.pages)) {
+      throw new Error(EMPTY_RESPONSE_MESSAGE);
+    }
+
+    commit({
+      ...showPages(state, response),
+      runtimeStatus: markRequestSuccess(state.runtimeStatus, mode, response.status ?? 'ok'),
+      debug: {
+        ...state.debug,
+        lastGatewayRequest: {
+          label,
+          mode,
+          status: response.status ?? 'ok',
+          updatedAt: new Date().toISOString()
+        },
+        lastError: null
+      }
+    });
+  } catch (error) {
+    console.warn('[gateway]', error);
+    const message = toUserErrorMessage(error);
+    commit({
+      ...showError(state, message),
+      runtimeStatus: markRequestFailure(state.runtimeStatus, mode, message),
+      debug: {
+        ...state.debug,
+        lastGatewayRequest: {
+          label,
+          mode,
+          status: 'failed',
+          updatedAt: new Date().toISOString()
+        },
+        lastError: message
+      }
     });
   }
 }
@@ -312,14 +428,56 @@ function emptySettings(seed?: Partial<RuntimeSettings>): RuntimeSettings {
   };
 }
 
+function buildDebugState(currentSettings: RuntimeSettings): DebugState {
+  return {
+    appVersion: APP_VERSION,
+    currentSettings,
+    lastGlassesInputEvent: null,
+    lastGatewayRequest: null,
+    lastError: null
+  };
+}
+
+function isGatewayRequestPending(): boolean {
+  return state.debug.lastGatewayRequest?.status === 'pending';
+}
+
+function hasRenderablePages(pages: string[]): boolean {
+  return pages.some((page) => page.trim().length > 0);
+}
+
+function withCurrentSettings(nextState: AppState, currentSettings: RuntimeSettings): AppState {
+  return {
+    ...nextState,
+    debug: {
+      ...nextState.debug,
+      currentSettings
+    }
+  };
+}
+
+function withDebugError(nextState: AppState, message: string): AppState {
+  return {
+    ...nextState,
+    debug: {
+      ...nextState.debug,
+      lastError: message
+    }
+  };
+}
+
 bindKeyboardInput(handleInput);
-bindEvenInput(handleInput).catch(() => undefined);
+bindEvenInput(handleEvenInput).catch(() => undefined);
 initializeEvenDisplay().catch(() => undefined);
 commit(state);
 bootstrap().catch((error) => {
   console.warn('[config]', error);
   commit({
     ...openSettings(state, emptySettings(), 'Could not load settings.'),
-    runtimeStatus: markConfigured(state.runtimeStatus, false)
+    runtimeStatus: markConfigured(state.runtimeStatus, false),
+    debug: {
+      ...state.debug,
+      lastError: 'Could not load settings.'
+    }
   });
 });
