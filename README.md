@@ -46,6 +46,8 @@ Runtime precedence is:
 2. `VITE_GATEWAY_URL` and `VITE_AUTH_VALUE`
 3. Unconfigured state that requires phone-side setup
 
+Packaged builds can disable the env fallback by setting `VITE_DISABLE_ENV_CONFIG=1` at build time.
+
 Do not commit `.env`.
 
 ## Browser controls for local dev
@@ -68,10 +70,22 @@ npm run dev
 Then generate a QR URL using your LAN IP:
 
 ```bash
-evenhub qr --url "http://YOUR_LAN_IP:5173"
+npm run qr
 ```
 
-Scan the QR code from the Even Realities app.
+Scan the QR code from the Even Realities app. Prototype and QR-driven development do not require a manifest version bump.
+
+## Packaging and versioning
+
+Even Hub can cache uploaded packages by the `app.json` version. Uploading a new `.ehpk` with the same manifest version can cause Even Hub to serve an older bundle.
+
+Use `npm run pack` for Even Hub uploads. It automatically:
+
+1. Increments the patch version in `app.json` and the other app manifest variants.
+2. Keeps `src/constants.ts` aligned by displaying only the manifest major/minor as `VEGA HUD vX.Y` for stale-bundle detection.
+3. Builds with `VITE_DISABLE_ENV_CONFIG=1` and creates `vega-hud.ehpk`.
+
+Example: `0.3.0` becomes `0.3.1`, while `APP_VERSION` remains `VEGA HUD v0.3`.
 
 ## Manifest
 
