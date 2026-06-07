@@ -101,7 +101,7 @@ function frameForState(state: AppState): Frame {
   if (state.screen === 'settings') {
     return {
       title: APP_VERSION,
-      body: 'Configure in phone app',
+      body: settingsBody(state),
       help: state.settingsRequired ? SETTINGS_REQUIRED_FOOTER : SETTINGS_FOOTER
     };
   }
@@ -137,6 +137,28 @@ function frameForState(state: AppState): Frame {
     body: formatForGlasses(state.errorMessage ?? 'Unknown error'),
     help: ERROR_FOOTER
   };
+}
+
+function settingsBody(state: AppState): string {
+  if (state.settingsRequired) {
+    return 'Configure in phone app';
+  }
+
+  if (state.settingsStatus === 'Testing connection...') {
+    return 'Checking gateway...';
+  }
+
+  if (state.runtimeStatus.lastCheckedAt) {
+    if (state.runtimeStatus.connected === true) {
+      return 'Gateway connected';
+    }
+
+    if (state.runtimeStatus.connected === false) {
+      return 'Gateway error';
+    }
+  }
+
+  return 'Configure in phone app';
 }
 
 function textContainer(

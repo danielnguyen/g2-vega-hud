@@ -5,6 +5,7 @@ import {
   LOADING_FOOTER,
   PAGES_FOOTER
 } from './constants';
+import type { RuntimeStatus } from './runtimeStatus';
 import type { AppState } from './types';
 import { MODES } from './types';
 
@@ -42,6 +43,9 @@ function renderHome(state: AppState): HTMLElement {
   const section = document.createElement('section');
   section.className = 'screen';
   section.appendChild(title(APP_VERSION));
+  section.appendChild(renderRuntimeStatus(state.runtimeStatus, false));
+  section.appendChild(renderSettingsLink('Open Settings'));
+  section.appendChild(subtitle('Debug / Manual Controls'));
 
   const list = document.createElement('div');
   list.className = 'mode-list';
@@ -56,7 +60,6 @@ function renderHome(state: AppState): HTMLElement {
   });
 
   section.appendChild(list);
-  section.appendChild(renderSettingsLink());
   section.appendChild(help(HOME_FOOTER));
   return section;
 }
@@ -100,6 +103,7 @@ function renderSettings(state: AppState): HTMLElement {
   const section = document.createElement('section');
   section.className = 'screen';
   section.appendChild(title('Settings'));
+  section.appendChild(renderRuntimeStatus(state.runtimeStatus, true));
 
   const form = document.createElement('form');
   form.className = 'settings-form';
@@ -112,7 +116,7 @@ function renderSettings(state: AppState): HTMLElement {
   actions.className = 'settings-actions';
   actions.appendChild(renderActionButton('Save', 'save'));
   actions.appendChild(renderActionButton('Clear', 'clear'));
-  actions.appendChild(renderActionButton('Test connection', 'test'));
+  actions.appendChild(renderActionButton('Test Connection', 'test'));
   form.appendChild(actions);
 
   section.appendChild(form);
@@ -137,12 +141,78 @@ function renderSettings(state: AppState): HTMLElement {
   return section;
 }
 
-function renderSettingsLink(): HTMLElement {
+function renderRuntimeStatus(status: RuntimeStatus, detailed: boolean): HTMLElement {
+  const section = document.createElement('section');
+  section.className = detailed ? 'status-panel status-panel-detailed' : 'status-panel';
+
+  const heading = subtitle(detailed ? 'Gateway Status' : 'Status');
+  section.appendChild(heading);
+  section.appendChild(renderStatusRow('Configuration', status.configured ? 'Configured' : 'Settings required'));
+  section.appendChild(renderStatusRow('Gateway', connectionLabel(status.connected)));
+
+  if (status.lastCheckedAt) {
+    section.appendChild(renderStatusRow('Last checked', formatTimestamp(status.lastCheckedAt)));
+  }
+
+  if (status.lastRequestAt) {
+    section.appendChild(renderStatusRow('Last request', formatTimestamp(status.lastRequestAt)));
+  }
+
+  if (status.lastMode) {
+    section.appendChild(renderStatusRow('Last mode', status.lastMode));
+  }
+
+  if (detailed && status.lastStatus) {
+    section.appendChild(renderStatusRow('Last status', status.lastStatus));
+  }
+
+  if (status.lastError) {
+    section.appendChild(renderStatusRow('Last error', status.lastError, 'warning'));
+  }
+
+  return section;
+}
+
+function renderStatusRow(labelText: string, valueText: string, tone: 'default' | 'warning' = 'default'): HTMLElement {
+  const row = document.createElement('p');
+  row.className = tone === 'warning' ? 'status-row status-row-warning' : 'status-row';
+
+  const label = document.createElement('strong');
+  label.textContent = `${labelText}: `;
+  row.appendChild(label);
+  row.appendChild(document.createTextNode(valueText));
+
+  return row;
+}
+
+function connectionLabel(connected: boolean | null): string {
+  if (connected === true) {
+    return 'Connected';
+  }
+
+  if (connected === false) {
+    return 'Not connected';
+  }
+
+  return 'Unknown';
+}
+
+function formatTimestamp(value: string): string {
+  const timestamp = new Date(value);
+
+  if (Number.isNaN(timestamp.getTime())) {
+    return value;
+  }
+
+  return timestamp.toLocaleString();
+}
+
+function renderSettingsLink(labelText = 'Settings'): HTMLElement {
   const button = document.createElement('button');
   button.type = 'button';
   button.className = 'settings-link';
   button.dataset.settingsAction = 'open';
-  button.textContent = 'Settings';
+  button.textContent = labelText;
   return button;
 }
 
@@ -183,6 +253,12 @@ function renderActionButton(label: string, action: 'save' | 'clear' | 'test'): H
 
 function title(value: string): HTMLElement {
   const element = document.createElement('h1');
+  element.textContent = value;
+  return element;
+}
+
+function subtitle(value: string): HTMLElement {
+  const element = document.createElement('h2');
   element.textContent = value;
   return element;
 }

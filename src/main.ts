@@ -4,6 +4,14 @@ import { bindEvenInput } from './even/evenInput';
 import { sendTurn } from './gatewayClient';
 import { bindKeyboardInput, type InputEventName } from './input';
 import { render } from './renderer';
+import {
+  initialRuntimeStatus,
+  markConfigured,
+  markConnectionCheck,
+  markRequestFailure,
+  markRequestStart,
+  markRequestSuccess
+} from './runtimeStatus';
 import { clearSettings, saveSettings, type RuntimeSettings } from './settings';
 import {
   applyConfig,
@@ -19,6 +27,8 @@ import {
 import { MODES, type AppState } from './types';
 import './style.css';
 
+const CONNECTION_TEST_PROMPT = 'Give me a one sentence system status check for the VEGA / LLM Memory stack.';
+
 const root = document.querySelector<HTMLDivElement>('#app');
 
 if (!root) {
@@ -27,7 +37,7 @@ if (!root) {
 
 const appRoot: HTMLDivElement = root;
 
-let state: AppState = initialState(false, emptySettings());
+let state: AppState = initialState(false, emptySettings(), initialRuntimeStatus(false));
 let evenDisplay: EvenDisplay | null = null;
 let config: AppConfig | null = null;
 
@@ -50,18 +60,31 @@ async function runSelectedMode(): Promise<void> {
   }
 
   if (!config) {
-    commit(openSettings(state, state.settingsDraft, 'Settings required before use.'));
+    commit({
+      ...openSettings(state, state.settingsDraft, 'Settings required before use.'),
+      runtimeStatus: markConfigured(state.runtimeStatus, false)
+    });
     return;
   }
 
-  commit(showLoading(state));
+  commit({
+    ...showLoading(state),
+    runtimeStatus: markRequestStart(state.runtimeStatus, selected.mode)
+  });
 
   try {
     const response = await sendTurn(config, selected.mode, selected.prompt);
-    commit(showPages(state, response));
+    commit({
+      ...showPages(state, response),
+      runtimeStatus: markRequestSuccess(state.runtimeStatus, selected.mode, response.status ?? 'ok')
+    });
   } catch (error) {
     console.warn('[gateway]', error);
-    commit(showError(state, toUserErrorMessage(error)));
+    const message = toUserErrorMessage(error);
+    commit({
+      ...showError(state, message),
+      runtimeStatus: markRequestFailure(state.runtimeStatus, selected.mode, message)
+    });
   }
 }
 
@@ -178,8 +201,9 @@ async function bootstrap(): Promise<void> {
   const settingsDraft = config
     ? { gatewayUrl: config.gatewayUrl, authValue: config.authValue }
     : emptySettings(envFallback ?? undefined);
+  const configured = Boolean(config);
 
-  commit(initialState(Boolean(config), settingsDraft));
+  commit(initialState(configured, settingsDraft, initialRuntimeStatus(configured)));
 }
 
 async function handleSaveSettings(): Promise<void> {
@@ -193,7 +217,15 @@ async function handleSaveSettings(): Promise<void> {
 
   await saveSettings(draft);
   config = nextConfig;
-  commit(applyConfig(state, draft, true, 'Settings saved.'));
+  commit(
+    applyConfig(
+      state,
+      draft,
+      true,
+      'Settings saved.',
+      markConfigured(state.runtimeStatus, true)
+    )
+  );
 }
 
 async function handleClearSettings(): Promise<void> {
@@ -208,13 +240,22 @@ async function handleClearSettings(): Promise<void> {
         state,
         { gatewayUrl: fallbackConfig.gatewayUrl, authValue: fallbackConfig.authValue },
         true,
-        'Saved settings cleared. Using env fallback.'
+        'Saved settings cleared. Using env fallback.',
+        markConfigured(state.runtimeStatus, true)
       )
     );
     return;
   }
 
-  commit(applyConfig(state, emptySettings(), false, 'Saved settings cleared. Settings required before use.'));
+  commit(
+    applyConfig(
+      state,
+      emptySettings(),
+      false,
+      'Saved settings cleared. Settings required before use.',
+      markConfigured(state.runtimeStatus, false)
+    )
+  );
 }
 
 async function handleTestConnection(): Promise<void> {
@@ -226,13 +267,23 @@ async function handleTestConnection(): Promise<void> {
     return;
   }
 
-  commit(openSettings(state, draft, 'Testing connection...'));
+  commit({
+    ...openSettings(state, draft, 'Testing connection...'),
+    runtimeStatus: markConnectionCheck(state.runtimeStatus, 'start')
+  });
 
   try {
-    await sendTurn(nextConfig, 'status', 'Connection test. Reply with one short sentence.');
-    commit(openSettings(state, draft, 'Connection ok.'));
+    const response = await sendTurn(nextConfig, 'status', CONNECTION_TEST_PROMPT);
+    commit({
+      ...openSettings(state, draft, 'Connection ok.'),
+      runtimeStatus: markConnectionCheck(state.runtimeStatus, 'success', response.status ?? 'ok')
+    });
   } catch (error) {
-    commit(openSettings(state, draft, toUserErrorMessage(error)));
+    const message = toUserErrorMessage(error);
+    commit({
+      ...openSettings(state, draft, message),
+      runtimeStatus: markConnectionCheck(state.runtimeStatus, 'failure', 'failed', message)
+    });
   }
 }
 
@@ -267,5 +318,8 @@ initializeEvenDisplay().catch(() => undefined);
 commit(state);
 bootstrap().catch((error) => {
   console.warn('[config]', error);
-  commit(openSettings(state, emptySettings(), 'Could not load settings.'));
+  commit({
+    ...openSettings(state, emptySettings(), 'Could not load settings.'),
+    runtimeStatus: markConfigured(state.runtimeStatus, false)
+  });
 });

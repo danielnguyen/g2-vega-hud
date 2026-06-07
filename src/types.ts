@@ -1,3 +1,4 @@
+import type { RuntimeStatus } from './runtimeStatus';
 import type { RuntimeSettings } from './settings';
 
 export type Mode = 'brief' | 'ask' | 'recall' | 'status';
@@ -20,6 +21,7 @@ export type AppState = {
   pageIndex: number;
   response: GatewayPageResponse | null;
   errorMessage: string | null;
+  runtimeStatus: RuntimeStatus;
   settingsDraft: RuntimeSettings;
   settingsStatus: string | null;
   settingsRequired: boolean;
