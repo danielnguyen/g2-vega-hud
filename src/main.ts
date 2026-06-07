@@ -327,14 +327,14 @@ async function handleTestConnection(): Promise<void> {
 }
 
 async function runHelloFromGlasses(): Promise<void> {
-  if (isGatewayRequestPending()) {
-    return;
-  }
-
   await runGatewayTurn('glasses-hello', 'ask', GLASSES_HELLO_PROMPT);
 }
 
 async function runGatewayTurn(label: string, mode: Mode, text: string): Promise<void> {
+  if (shouldSuppressGatewayTurn()) {
+    return;
+  }
+
   if (!config) {
     commit({
       ...openSettings(state, state.settingsDraft, 'Settings required before use.'),
@@ -440,6 +440,10 @@ function buildDebugState(currentSettings: RuntimeSettings): DebugState {
 
 function isGatewayRequestPending(): boolean {
   return state.debug.lastGatewayRequest?.status === 'pending';
+}
+
+function shouldSuppressGatewayTurn(): boolean {
+  return isGatewayRequestPending();
 }
 
 function hasRenderablePages(pages: string[]): boolean {

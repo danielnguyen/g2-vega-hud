@@ -33,10 +33,16 @@ async function main() {
 
 async function findManifestFiles(rootDir) {
   const entries = await readdir(rootDir, { withFileTypes: true });
-  return entries
+  const fileNames = entries
     .filter((entry) => entry.isFile())
     .map((entry) => entry.name)
-    .filter((name) => name === 'app.json' || /^app\..*\.json$/.test(name) || name === 'app.json.example')
+    .filter((name) => name === 'app.json' || /^app\..*\.json$/.test(name) || name === 'app.json.example');
+
+  if (!fileNames.includes('app.json')) {
+    throw new Error('app.json is missing. Copy app.json.example to app.json and edit local values before packing.');
+  }
+
+  return fileNames
     .sort((left, right) => {
       if (left === 'app.json') return -1;
       if (right === 'app.json') return 1;
