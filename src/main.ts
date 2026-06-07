@@ -146,8 +146,11 @@ function handleInput(eventName: InputEventName): void {
 }
 
 function handleEvenInput(event: NormalizedEvenInputEvent): void {
+  const settingsDraft = state.screen === 'settings' ? currentDraft() : state.settingsDraft;
+
   commit({
     ...state,
+    settingsDraft,
     debug: {
       ...state.debug,
       lastGlassesInputEvent: event

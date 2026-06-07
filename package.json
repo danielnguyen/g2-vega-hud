@@ -1,6 +1,6 @@
 {
   "name": "g2-vega-hud",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Even Realities G2 heads-up client for VEGA.",
   "type": "module",
   "private": false,
