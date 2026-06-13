@@ -199,6 +199,14 @@ function applyGlassesInputGate(event: NormalizedEvenInputEvent): NormalizedEvenI
     };
   }
 
+  if (event.mappedAction === 'doublePress') {
+    lastHandledGlassesActionAt = Date.now();
+    return {
+      ...event,
+      handling: 'accepted'
+    };
+  }
+
   const now = Date.now();
   if (now - lastHandledGlassesActionAt < GLASSES_INPUT_GATE_MS) {
     return {
