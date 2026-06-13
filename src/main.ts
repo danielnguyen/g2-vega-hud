@@ -1,6 +1,6 @@
 import { configFromSettings, loadConfig, loadEnvConfig, type AppConfig } from './config';
 import { waitForEvenBridge } from './even/evenBridge';
-import { createEvenDisplay, type EvenDisplay } from './even/evenDisplay';
+import { createEvenDisplay, type EvenDisplay, type EvenDisplayBridge } from './even/evenDisplay';
 import { bindEvenInput, type NormalizedEvenInputEvent } from './even/evenInput';
 import { sendTurn } from './gatewayClient';
 import { bindKeyboardInput, type InputEventName } from './input';
@@ -179,7 +179,7 @@ async function initializeEvenIntegration(): Promise<void> {
       retryDelayMs: GLASSES_INPUT_GATE_MS
     });
 
-    evenDisplay = await createEvenDisplay(bridge);
+    evenDisplay = await createEvenDisplay(bridge as unknown as EvenDisplayBridge);
     await evenDisplay.render(state);
 
     evenInputUnsubscribe?.();
