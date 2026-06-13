@@ -5,7 +5,7 @@ import {
   PAGES_FOOTER
 } from './constants';
 import type { RuntimeStatus } from './runtimeStatus';
-import type { AppState, GatewayRequestDebug, GlassesInputDebugEvent } from './types';
+import type { AppState, EvenInputBindingDebug, GatewayRequestDebug, GlassesInputDebugEvent } from './types';
 import { MODES } from './types';
 
 export function render(root: HTMLElement, state: AppState): void {
@@ -149,7 +149,8 @@ function renderDebugPanel(state: AppState): HTMLElement {
   section.appendChild(renderStatusRow('App version', state.debug.appVersion));
   section.appendChild(renderStatusRow('Gateway URL', state.debug.currentSettings.gatewayUrl || 'Not configured'));
   section.appendChild(renderStatusRow('Auth token', redactAuthValue(state.debug.currentSettings.authValue)));
-  section.appendChild(renderStatusRow('Last input', formatGlassesInput(state.debug.lastGlassesInputEvent)));
+  section.appendChild(renderStatusRow('Glasses input', formatInputBinding(state.debug.evenInputBinding), state.debug.evenInputBinding.status === 'failed' ? 'warning' : 'default'));
+  section.appendChild(renderStatusRow('Last input', formatGlassesInput(state.debug.lastGlassesInputEvent), state.debug.lastGlassesInputEvent?.handling === 'gated' ? 'warning' : 'default'));
   section.appendChild(renderStatusRow('Last request', formatGatewayRequest(state.debug.lastGatewayRequest)));
   section.appendChild(renderStatusRow('Last error', state.debug.lastError ?? 'None', state.debug.lastError ? 'warning' : 'default'));
   return section;
@@ -211,12 +212,16 @@ function connectionLabel(connected: boolean | null): string {
   return 'Unknown';
 }
 
+function formatInputBinding(binding: EvenInputBindingDebug): string {
+  return `${binding.status} / ${binding.detail} / ${formatTimestamp(binding.updatedAt)}`;
+}
+
 function formatGlassesInput(event: GlassesInputDebugEvent | null): string {
   if (!event) {
     return 'None';
   }
 
-  return `${event.summary} • ${formatTimestamp(event.timestamp)}`;
+  return `${event.summary} / ${event.handling} / ${formatTimestamp(event.timestamp)}`;
 }
 
 function formatGatewayRequest(request: GatewayRequestDebug | null): string {

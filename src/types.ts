@@ -31,12 +31,20 @@ export type GlassesInputDebugEvent = {
   eventSource: string | null;
   target: string | null;
   summary: string;
+  handling: 'accepted' | 'gated' | 'ignored';
+};
+
+export type EvenInputBindingDebug = {
+  status: 'idle' | 'binding' | 'ready' | 'failed';
+  detail: string;
+  updatedAt: string;
 };
 
 export type DebugState = {
   appVersion: string;
   currentSettings: RuntimeSettings;
   lastGlassesInputEvent: GlassesInputDebugEvent | null;
+  evenInputBinding: EvenInputBindingDebug;
   lastGatewayRequest: GatewayRequestDebug | null;
   lastError: string | null;
 };
