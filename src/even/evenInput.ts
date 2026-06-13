@@ -1,8 +1,8 @@
-import { OsEventTypeList, waitForEvenAppBridge, type EvenHubEvent } from '@evenrealities/even_hub_sdk';
+import { OsEventTypeList, type EvenHubEvent } from '@evenrealities/even_hub_sdk';
 import type { InputEventName } from '../input';
 import type { GlassesInputDebugEvent } from '../types';
 
-type EvenInputBridgeLike = {
+export type EvenInputBridge = {
   onEvenHubEvent(callback: (event: EvenHubEvent) => void): () => void;
 };
 
@@ -10,20 +10,13 @@ export type NormalizedEvenInputEvent = GlassesInputDebugEvent & {
   mappedAction: InputEventName | null;
 };
 
-export async function bindEvenInput(
-  handler: (event: NormalizedEvenInputEvent) => void,
-  timeoutMs = 1500
-): Promise<(() => void) | null> {
-  try {
-    const bridge = await withTimeout(waitForEvenAppBridge(), timeoutMs);
-    const unsubscribe = (bridge as unknown as EvenInputBridgeLike).onEvenHubEvent((event) => {
-      handler(normalizeEvenHubEvent(event));
-    });
-
-    return unsubscribe;
-  } catch {
-    return null;
-  }
+export function bindEvenInput(
+  bridge: EvenInputBridge,
+  handler: (event: NormalizedEvenInputEvent) => void
+): () => void {
+  return bridge.onEvenHubEvent((event) => {
+    handler(normalizeEvenHubEvent(event));
+  });
 }
 
 function normalizeEvenHubEvent(event: EvenHubEvent): NormalizedEvenInputEvent {
@@ -75,7 +68,8 @@ function normalizeEvenHubEvent(event: EvenHubEvent): NormalizedEvenInputEvent {
     mappedAction,
     eventSource,
     target,
-    summary: summaryParts.join(' ')
+    summary: summaryParts.join(' '),
+    handling: mappedAction ? 'accepted' : 'ignored'
   };
 }
 
@@ -155,20 +149,4 @@ function isLifecycleEvent(eventType: OsEventTypeList | undefined): boolean {
     eventType === OsEventTypeList.ABNORMAL_EXIT_EVENT ||
     eventType === OsEventTypeList.SYSTEM_EXIT_EVENT
   );
-}
-
-async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
-  let timeoutId: ReturnType<typeof setTimeout> | undefined;
-
-  const timeout = new Promise<never>((_, reject) => {
-    timeoutId = setTimeout(() => reject(new Error('Even bridge unavailable')), timeoutMs);
-  });
-
-  try {
-    return await Promise.race([promise, timeout]);
-  } finally {
-    if (timeoutId) {
-      clearTimeout(timeoutId);
-    }
-  }
 }
