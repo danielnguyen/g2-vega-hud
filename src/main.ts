@@ -179,7 +179,7 @@ async function initializeEvenIntegration(): Promise<void> {
 function handleEvenLifecycle(event: EvenLifecycleEvent): void {
   if (event === 'foreground-enter') {
     updateEvenLifecycle('foreground', 'Foreground entered.');
-    evenDisplay?.render(state.glassesNavigation).catch(() => recordEvenFailure('Even display update failed.'));
+    evenDisplay?.refresh(state.glassesNavigation).catch(() => recordEvenFailure('Even display refresh failed.'));
     return;
   }
 

@@ -6,9 +6,9 @@ import {
   TextContainerProperty,
   TextContainerUpgrade
 } from '@evenrealities/even_hub_sdk';
-import { G2_HOME_ITEMS, type G2NavigationState, type G2Route } from '../navigation';
-import { RecoverableSerialQueue } from '../serialQueue';
-import type { EvenBridge } from './evenBridge';
+import { G2_HOME_ITEMS, type G2NavigationState, type G2Route } from '../navigation.ts';
+import { RecoverableSerialQueue } from '../serialQueue.ts';
+import type { EvenBridge } from './evenBridge.ts';
 
 const HOME_LIST_ID = 1;
 const HOME_LIST_NAME = 'g2-home';
@@ -19,6 +19,7 @@ type ContainerKind = 'list' | 'text';
 
 export type EvenDisplay = {
   render(navigation: G2NavigationState): Promise<void>;
+  refresh(navigation: G2NavigationState): Promise<void>;
   requestHostExit(): Promise<boolean>;
 };
 
@@ -32,8 +33,11 @@ class EvenGlassesDisplay implements EvenDisplay {
   private containerKind: ContainerKind | null = null;
   private renderedRoute: G2Route | null = null;
   private readonly renderQueue = new RecoverableSerialQueue();
+  private readonly bridge: EvenBridge;
 
-  constructor(private readonly bridge: EvenBridge) {}
+  constructor(bridge: EvenBridge) {
+    this.bridge = bridge;
+  }
 
   async initialize(): Promise<void> {
     const result = await this.bridge.createStartUpPageContainer(startupHomePage());
@@ -47,6 +51,10 @@ class EvenGlassesDisplay implements EvenDisplay {
 
   render(navigation: G2NavigationState): Promise<void> {
     return this.renderQueue.run(() => this.performRender(navigation));
+  }
+
+  refresh(navigation: G2NavigationState): Promise<void> {
+    return this.renderQueue.run(() => this.performRefresh(navigation));
   }
 
   requestHostExit(): Promise<boolean> {
@@ -71,6 +79,16 @@ class EvenGlassesDisplay implements EvenDisplay {
       if (!upgraded) throw new Error('Even text update failed.');
       this.renderedRoute = navigation.route;
     }
+  }
+
+  private async performRefresh(navigation: G2NavigationState): Promise<void> {
+    const nextKind: ContainerKind = navigation.route === 'home' ? 'list' : 'text';
+    const page = navigation.route === 'home' ? rebuildHomePage() : childPage(navigation.route);
+    const rebuilt = await this.bridge.rebuildPageContainer(page);
+
+    if (!rebuilt) throw new Error('Even display refresh failed.');
+    this.containerKind = nextKind;
+    this.renderedRoute = navigation.route;
   }
 }
 
