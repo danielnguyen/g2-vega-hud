@@ -1,4 +1,3 @@
-import { waitForEvenAppBridge } from '@evenrealities/even_hub_sdk';
 import {
   ERROR_FOOTER,
   HOME_FOOTER,
@@ -37,7 +36,7 @@ type TextUpgradePayload = {
   content: string;
 };
 
-type EvenBridgeLike = {
+export type EvenDisplayBridge = {
   createStartUpPageContainer(container: PageContainerPayload): Promise<number>;
   textContainerUpgrade(container: TextUpgradePayload): Promise<boolean>;
 };
@@ -52,21 +51,16 @@ export type EvenDisplay = {
   render(state: AppState): Promise<void>;
 };
 
-export async function createEvenDisplay(timeoutMs = 1500): Promise<EvenDisplay | null> {
-  try {
-    const bridge = await withTimeout(waitForEvenAppBridge(), timeoutMs);
-    const display = new EvenGlassesDisplay(bridge as unknown as EvenBridgeLike);
-    await display.initialize();
-    return display;
-  } catch {
-    return null;
-  }
+export async function createEvenDisplay(bridge: EvenDisplayBridge): Promise<EvenDisplay> {
+  const display = new EvenGlassesDisplay(bridge);
+  await display.initialize();
+  return display;
 }
 
 class EvenGlassesDisplay implements EvenDisplay {
   private initialized = false;
 
-  constructor(private readonly bridge: EvenBridgeLike) {}
+  constructor(private readonly bridge: EvenDisplayBridge) {}
 
   async initialize(): Promise<void> {
     if (this.initialized) return;
@@ -193,8 +187,8 @@ function textUpgrade(containerID: number, containerName: string, content: string
 
 function formatForGlasses(value: string): string {
   const normalized = normalizeForEvenDisplay(value)
-    .replace(/[ \t]+\n/g, '\n')
-    .replace(/\n[ \t]+/g, '\n')
+    .replace(/[ 	]+\n/g, '\n')
+    .replace(/\n[ 	]+/g, '\n')
     .trim();
 
   if (normalized.length <= 220) {
@@ -214,20 +208,4 @@ function normalizeForEvenDisplay(value: string): string {
     .replace(/[\u2022\u2023\u25E6\u2043\u2219]/g, '-')
     .replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}]/gu, '')
     .replace(/[^\x09\x0A\x20-\x7E]/g, '');
-}
-
-async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
-  let timeoutId: ReturnType<typeof setTimeout> | undefined;
-
-  const timeout = new Promise<never>((_, reject) => {
-    timeoutId = setTimeout(() => reject(new Error('Even bridge unavailable')), timeoutMs);
-  });
-
-  try {
-    return await Promise.race([promise, timeout]);
-  } finally {
-    if (timeoutId) {
-      clearTimeout(timeoutId);
-    }
-  }
 }

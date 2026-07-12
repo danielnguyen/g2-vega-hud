@@ -1,5 +1,6 @@
 import { configFromSettings, loadConfig, loadEnvConfig, type AppConfig } from './config';
-import { createEvenDisplay, type EvenDisplay } from './even/evenDisplay';
+import { waitForEvenBridge } from './even/evenBridge';
+import { createEvenDisplay, type EvenDisplay, type EvenDisplayBridge } from './even/evenDisplay';
 import { bindEvenInput, type NormalizedEvenInputEvent } from './even/evenInput';
 import { sendTurn } from './gatewayClient';
 import { bindKeyboardInput, type InputEventName } from './input';
@@ -24,13 +25,16 @@ import {
   showLoading,
   showPages
 } from './state';
-import { MODES, type AppState, type DebugState, type Mode } from './types';
+import { MODES, type AppState, type DebugState, type EvenInputBindingDebug, type Mode } from './types';
 import { APP_VERSION } from './version';
 import './style.css';
 
 const CONNECTION_TEST_PROMPT = 'Give me a one sentence system status check for the VEGA / LLM Memory stack.';
 const GLASSES_HELLO_PROMPT = 'Say hello from VEGA HUD';
 const EMPTY_RESPONSE_MESSAGE = 'Gateway returned no renderable pages.';
+const GLASSES_INPUT_GATE_MS = 250;
+const EVEN_BRIDGE_TIMEOUT_MS = 5000;
+const EVEN_BRIDGE_RETRIES = 4;
 
 const root = document.querySelector<HTMLDivElement>('#app');
 
@@ -42,7 +46,9 @@ const appRoot: HTMLDivElement = root;
 
 let state: AppState = initialState(false, emptySettings(), initialRuntimeStatus(false), buildDebugState(emptySettings()));
 let evenDisplay: EvenDisplay | null = null;
+let evenInputUnsubscribe: (() => void) | null = null;
 let config: AppConfig | null = null;
+let lastHandledGlassesActionAt = 0;
 
 function commit(nextState: AppState): void {
   state = nextState;
@@ -147,27 +153,96 @@ function handleInput(eventName: InputEventName): void {
 
 function handleEvenInput(event: NormalizedEvenInputEvent): void {
   const settingsDraft = state.screen === 'settings' ? currentDraft() : state.settingsDraft;
+  const nextEvent = applyGlassesInputGate(event);
 
   commit({
     ...state,
     settingsDraft,
     debug: {
       ...state.debug,
-      lastGlassesInputEvent: event
+      lastGlassesInputEvent: nextEvent
     }
   });
 
-  if (event.mappedAction) {
-    handleInput(event.mappedAction);
+  if (nextEvent.mappedAction && nextEvent.handling === 'accepted') {
+    handleInput(nextEvent.mappedAction);
   }
 }
 
-async function initializeEvenDisplay(): Promise<void> {
-  evenDisplay = await createEvenDisplay();
+async function initializeEvenIntegration(): Promise<void> {
+  updateEvenInputBinding('binding', 'Waiting for Even bridge...');
 
-  if (evenDisplay) {
+  try {
+    const bridge = await waitForEvenBridge({
+      timeoutMs: EVEN_BRIDGE_TIMEOUT_MS,
+      retries: EVEN_BRIDGE_RETRIES,
+      retryDelayMs: GLASSES_INPUT_GATE_MS
+    });
+
+    evenDisplay = await createEvenDisplay(bridge as unknown as EvenDisplayBridge);
     await evenDisplay.render(state);
+
+    evenInputUnsubscribe?.();
+    evenInputUnsubscribe = bindEvenInput(bridge, handleEvenInput);
+    updateEvenInputBinding('ready', 'Bound to shared Even bridge.');
+  } catch (error) {
+    console.warn('[even-input] failed to initialize', error);
+    updateEvenInputBinding('failed', inputBindingMessage(error));
   }
+}
+
+function applyGlassesInputGate(event: NormalizedEvenInputEvent): NormalizedEvenInputEvent {
+  if (!event.mappedAction) {
+    return {
+      ...event,
+      handling: 'ignored'
+    };
+  }
+
+  if (event.mappedAction === 'doublePress') {
+    lastHandledGlassesActionAt = Date.now();
+    return {
+      ...event,
+      handling: 'accepted'
+    };
+  }
+
+  const now = Date.now();
+  if (now - lastHandledGlassesActionAt < GLASSES_INPUT_GATE_MS) {
+    return {
+      ...event,
+      summary: `${event.summary} [gated ${GLASSES_INPUT_GATE_MS}ms]`,
+      handling: 'gated'
+    };
+  }
+
+  lastHandledGlassesActionAt = now;
+  return {
+    ...event,
+    handling: 'accepted'
+  };
+}
+
+function updateEvenInputBinding(status: EvenInputBindingDebug['status'], detail: string): void {
+  commit({
+    ...state,
+    debug: {
+      ...state.debug,
+      evenInputBinding: {
+        status,
+        detail,
+        updatedAt: new Date().toISOString()
+      }
+    }
+  });
+}
+
+function inputBindingMessage(error: unknown): string {
+  if (error instanceof Error && error.message.trim()) {
+    return error.message;
+  }
+
+  return 'Even input binding failed.';
 }
 
 function toUserErrorMessage(error: unknown): string {
@@ -202,7 +277,7 @@ async function bootstrap(): Promise<void> {
     : emptySettings(envFallback ?? undefined);
   const configured = Boolean(config);
 
-  commit(initialState(configured, settingsDraft, initialRuntimeStatus(configured), buildDebugState(settingsDraft)));
+  commit(initialState(configured, settingsDraft, initialRuntimeStatus(configured), buildDebugState(settingsDraft, state.debug)));
 }
 
 async function handleSaveSettings(): Promise<void> {
@@ -428,13 +503,18 @@ function emptySettings(seed?: Partial<RuntimeSettings>): RuntimeSettings {
   };
 }
 
-function buildDebugState(currentSettings: RuntimeSettings): DebugState {
+function buildDebugState(currentSettings: RuntimeSettings, previous?: Partial<DebugState>): DebugState {
   return {
     appVersion: APP_VERSION,
     currentSettings,
-    lastGlassesInputEvent: null,
-    lastGatewayRequest: null,
-    lastError: null
+    lastGlassesInputEvent: previous?.lastGlassesInputEvent ?? null,
+    evenInputBinding: previous?.evenInputBinding ?? {
+      status: 'idle',
+      detail: 'Not started.',
+      updatedAt: new Date().toISOString()
+    },
+    lastGatewayRequest: previous?.lastGatewayRequest ?? null,
+    lastError: previous?.lastError ?? null
   };
 }
 
@@ -471,9 +551,11 @@ function withDebugError(nextState: AppState, message: string): AppState {
 }
 
 bindKeyboardInput(handleInput);
-bindEvenInput(handleEvenInput).catch(() => undefined);
-initializeEvenDisplay().catch(() => undefined);
 commit(state);
+initializeEvenIntegration().catch((error) => {
+  console.warn('[even-input] startup', error);
+  updateEvenInputBinding('failed', inputBindingMessage(error));
+});
 bootstrap().catch((error) => {
   console.warn('[config]', error);
   commit({
