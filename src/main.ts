@@ -1,35 +1,26 @@
 import { configFromSettings, loadConfig, loadEnvConfig, type AppConfig } from './config';
+import { getEvenBridge } from './even/evenBridge';
 import { createEvenDisplay, type EvenDisplay } from './even/evenDisplay';
 import { bindEvenInput, type NormalizedEvenInputEvent } from './even/evenInput';
 import { sendTurn } from './gatewayClient';
 import { bindKeyboardInput, type InputEventName } from './input';
+import { filterDuplicateInput, type InputDedupeState } from './inputDedupe';
+import { G2_HOME_ITEMS, transitionG2Navigation, type G2NavigationAction } from './navigation';
 import { render } from './renderer';
-import {
-  initialRuntimeStatus,
-  markConfigured,
-  markConnectionCheck,
-  markRequestFailure,
-  markRequestStart,
-  markRequestSuccess
-} from './runtimeStatus';
+import { initialRuntimeStatus, markConfigured, markConnectionCheck } from './runtimeStatus';
 import { clearSettings, saveSettings, type RuntimeSettings } from './settings';
 import {
   applyConfig,
   backHome,
   initialState,
-  movePage,
   moveSelection,
-  openSettings,
-  showError,
-  showLoading,
-  showPages
+  openSettings
 } from './state';
-import { MODES, type AppState, type DebugState, type Mode } from './types';
+import type { AppState, DebugState, EvenInputBindingDebug } from './types';
 import { APP_VERSION } from './version';
 import './style.css';
 
 const CONNECTION_TEST_PROMPT = 'Give me a one sentence system status check for the VEGA / LLM Memory stack.';
-const GLASSES_HELLO_PROMPT = 'Say hello from VEGA HUD';
 const EMPTY_RESPONSE_MESSAGE = 'Gateway returned no renderable pages.';
 
 const root = document.querySelector<HTMLDivElement>('#app');
@@ -42,7 +33,9 @@ const appRoot: HTMLDivElement = root;
 
 let state: AppState = initialState(false, emptySettings(), initialRuntimeStatus(false), buildDebugState(emptySettings()));
 let evenDisplay: EvenDisplay | null = null;
+let evenInputUnsubscribe: (() => void) | null = null;
 let config: AppConfig | null = null;
+let inputDedupeState: InputDedupeState = null;
 
 function commit(nextState: AppState): void {
   state = nextState;
@@ -51,18 +44,8 @@ function commit(nextState: AppState): void {
   bindSettingsControls();
 
   if (evenDisplay) {
-    evenDisplay.render(state).catch(() => undefined);
+    evenDisplay.render(state.glassesNavigation).catch(() => recordEvenFailure('Even display update failed.'));
   }
-}
-
-async function runSelectedMode(): Promise<void> {
-  const selected = MODES[state.selectedModeIndex];
-  if (!selected) {
-    commit(withDebugError(showError(state, 'No mode selected'), 'No mode selected'));
-    return;
-  }
-
-  await runGatewayTurn(selected.label, selected.mode, selected.prompt);
 }
 
 function bindModeClicks(): void {
@@ -70,16 +53,12 @@ function bindModeClicks(): void {
     element.addEventListener('click', () => {
       const modeIndex = Number(element.dataset.modeIndex);
 
-      if (!Number.isInteger(modeIndex) || modeIndex < 0 || modeIndex >= MODES.length) {
+      if (!Number.isInteger(modeIndex) || modeIndex < 0 || modeIndex >= G2_HOME_ITEMS.length) {
         return;
       }
 
-      state = {
-        ...state,
-        selectedModeIndex: modeIndex
-      };
-
-      void runSelectedMode();
+      applyNavigation({ type: 'select', index: modeIndex });
+      applyNavigation({ type: 'open-selected' });
     });
   });
 }
@@ -119,55 +98,100 @@ function bindSettingsControls(): void {
   });
 }
 
-function handleInput(eventName: InputEventName): void {
-  if (state.screen === 'home') {
-    if (eventName === 'up') commit(moveSelection(state, -1));
-    if (eventName === 'down') commit(moveSelection(state, 1));
-    if (eventName === 'press') void runSelectedMode();
-    if (eventName === 'doublePress') void runHelloFromGlasses();
+function handleInput(eventName: InputEventName, nativeSelectedIndex: number | null = null): void {
+  const atHome = state.glassesNavigation.route === 'home';
+
+  if (atHome && nativeSelectedIndex !== null) {
+    applyNavigation({ type: 'select', index: nativeSelectedIndex });
+  }
+
+  if (eventName === 'doublePress') {
+    applyNavigation({ type: 'back-or-exit' });
     return;
   }
 
-  if (state.screen === 'pages') {
-    if (eventName === 'up') commit(movePage(state, -1));
-    if (eventName === 'down') commit(movePage(state, 1));
-    if (eventName === 'press' || eventName === 'doublePress') commit(backHome(state));
-    return;
-  }
-
-  if (state.screen === 'loading' && eventName === 'doublePress') {
-    commit(backHome(state));
-    return;
-  }
-
-  if (state.screen === 'error' && (eventName === 'press' || eventName === 'doublePress')) {
-    commit(backHome(state));
-  }
+  if (!atHome) return;
+  if (eventName === 'press') applyNavigation({ type: 'open-selected' });
+  if (nativeSelectedIndex === null && eventName === 'up') commit(moveSelection(state, -1));
+  if (nativeSelectedIndex === null && eventName === 'down') commit(moveSelection(state, 1));
 }
 
 function handleEvenInput(event: NormalizedEvenInputEvent): void {
   const settingsDraft = state.screen === 'settings' ? currentDraft() : state.settingsDraft;
+  const dedupe = event.mappedAction
+    ? filterDuplicateInput(inputDedupeState, { key: event.dedupeKey, receivedAt: Date.now() })
+    : { accepted: false, state: inputDedupeState };
+  inputDedupeState = dedupe.state;
+  const handledEvent: NormalizedEvenInputEvent = {
+    ...event,
+    handling: !event.mappedAction ? 'ignored' : dedupe.accepted ? 'accepted' : 'duplicate'
+  };
 
   commit({
     ...state,
     settingsDraft,
     debug: {
       ...state.debug,
-      lastGlassesInputEvent: event
+      lastGlassesInputEvent: handledEvent
     }
   });
 
-  if (event.mappedAction) {
-    handleInput(event.mappedAction);
+  if (handledEvent.mappedAction && handledEvent.handling === 'accepted') {
+    handleInput(handledEvent.mappedAction, handledEvent.selectedIndex);
   }
 }
 
-async function initializeEvenDisplay(): Promise<void> {
-  evenDisplay = await createEvenDisplay();
+async function initializeEvenIntegration(): Promise<void> {
+  updateEvenInputBinding('binding', 'Waiting for shared Even bridge.');
 
-  if (evenDisplay) {
-    await evenDisplay.render(state);
+  try {
+    const bridge = await getEvenBridge();
+    evenDisplay = await createEvenDisplay(bridge);
+    evenInputUnsubscribe?.();
+    evenInputUnsubscribe = bindEvenInput(bridge, handleEvenInput);
+    updateEvenInputBinding('ready', 'Bound to shared Even bridge.');
+  } catch {
+    evenDisplay = null;
+    evenInputUnsubscribe?.();
+    evenInputUnsubscribe = null;
+    updateEvenInputBinding('failed', 'Even bridge or input binding unavailable.');
   }
+}
+
+function applyNavigation(action: G2NavigationAction): void {
+  const transition = transitionG2Navigation(state.glassesNavigation, action);
+  commit({
+    ...state,
+    glassesNavigation: transition.state,
+    selectedModeIndex: transition.state.selectedIndex
+  });
+
+  if (transition.effect === 'request-host-exit') {
+    evenDisplay?.requestHostExit().catch(() => recordEvenFailure('Host exit request failed.'));
+  }
+}
+
+function updateEvenInputBinding(status: EvenInputBindingDebug['status'], detail: string): void {
+  commit({
+    ...state,
+    debug: {
+      ...state.debug,
+      evenInputBinding: { status, detail, updatedAt: new Date().toISOString() }
+    }
+  });
+}
+
+function recordEvenFailure(detail: string): void {
+  state = {
+    ...state,
+    debug: {
+      ...state.debug,
+      evenInputBinding: { status: 'failed', detail, updatedAt: new Date().toISOString() }
+    }
+  };
+  render(appRoot, state);
+  bindModeClicks();
+  bindSettingsControls();
 }
 
 function toUserErrorMessage(error: unknown): string {
@@ -202,7 +226,17 @@ async function bootstrap(): Promise<void> {
     : emptySettings(envFallback ?? undefined);
   const configured = Boolean(config);
 
-  commit(initialState(configured, settingsDraft, initialRuntimeStatus(configured), buildDebugState(settingsDraft)));
+  const nextState = initialState(
+    configured,
+    settingsDraft,
+    initialRuntimeStatus(configured),
+    buildDebugState(settingsDraft, state.debug)
+  );
+  commit({
+    ...nextState,
+    glassesNavigation: state.glassesNavigation,
+    selectedModeIndex: state.glassesNavigation.selectedIndex
+  });
 }
 
 async function handleSaveSettings(): Promise<void> {
@@ -326,83 +360,6 @@ async function handleTestConnection(): Promise<void> {
   }
 }
 
-async function runHelloFromGlasses(): Promise<void> {
-  await runGatewayTurn('glasses-hello', 'ask', GLASSES_HELLO_PROMPT);
-}
-
-async function runGatewayTurn(label: string, mode: Mode, text: string): Promise<void> {
-  if (shouldSuppressGatewayTurn()) {
-    return;
-  }
-
-  if (!config) {
-    commit({
-      ...openSettings(state, state.settingsDraft, 'Settings required before use.'),
-      runtimeStatus: markConfigured(state.runtimeStatus, false),
-      debug: {
-        ...state.debug,
-        lastError: 'Settings required before use.'
-      }
-    });
-    return;
-  }
-
-  commit({
-    ...showLoading(state),
-    runtimeStatus: markRequestStart(state.runtimeStatus, mode),
-    debug: {
-      ...state.debug,
-      lastGatewayRequest: {
-        label,
-        mode,
-        status: 'pending',
-        updatedAt: new Date().toISOString()
-      },
-      lastError: null
-    }
-  });
-
-  try {
-    const response = await sendTurn(config, mode, text);
-
-    if (!hasRenderablePages(response.pages)) {
-      throw new Error(EMPTY_RESPONSE_MESSAGE);
-    }
-
-    commit({
-      ...showPages(state, response),
-      runtimeStatus: markRequestSuccess(state.runtimeStatus, mode, response.status ?? 'ok'),
-      debug: {
-        ...state.debug,
-        lastGatewayRequest: {
-          label,
-          mode,
-          status: response.status ?? 'ok',
-          updatedAt: new Date().toISOString()
-        },
-        lastError: null
-      }
-    });
-  } catch (error) {
-    console.warn('[gateway]', error);
-    const message = toUserErrorMessage(error);
-    commit({
-      ...showError(state, message),
-      runtimeStatus: markRequestFailure(state.runtimeStatus, mode, message),
-      debug: {
-        ...state.debug,
-        lastGatewayRequest: {
-          label,
-          mode,
-          status: 'failed',
-          updatedAt: new Date().toISOString()
-        },
-        lastError: message
-      }
-    });
-  }
-}
-
 function currentDraft(): RuntimeSettings {
   return readSettingsForm();
 }
@@ -428,26 +385,19 @@ function emptySettings(seed?: Partial<RuntimeSettings>): RuntimeSettings {
   };
 }
 
-function buildDebugState(currentSettings: RuntimeSettings): DebugState {
+function buildDebugState(currentSettings: RuntimeSettings, previous?: Partial<DebugState>): DebugState {
   return {
     appVersion: APP_VERSION,
     currentSettings,
-    lastGlassesInputEvent: null,
-    lastGatewayRequest: null,
-    lastError: null
+    evenInputBinding: previous?.evenInputBinding ?? {
+      status: 'idle',
+      detail: 'Not started.',
+      updatedAt: new Date().toISOString()
+    },
+    lastGlassesInputEvent: previous?.lastGlassesInputEvent ?? null,
+    lastGatewayRequest: previous?.lastGatewayRequest ?? null,
+    lastError: previous?.lastError ?? null
   };
-}
-
-function isGatewayRequestPending(): boolean {
-  return state.debug.lastGatewayRequest?.status === 'pending';
-}
-
-function shouldSuppressGatewayTurn(): boolean {
-  return isGatewayRequestPending();
-}
-
-function hasRenderablePages(pages: string[]): boolean {
-  return pages.some((page) => page.trim().length > 0);
 }
 
 function withCurrentSettings(nextState: AppState, currentSettings: RuntimeSettings): AppState {
@@ -460,22 +410,11 @@ function withCurrentSettings(nextState: AppState, currentSettings: RuntimeSettin
   };
 }
 
-function withDebugError(nextState: AppState, message: string): AppState {
-  return {
-    ...nextState,
-    debug: {
-      ...nextState.debug,
-      lastError: message
-    }
-  };
-}
-
 bindKeyboardInput(handleInput);
-bindEvenInput(handleEvenInput).catch(() => undefined);
-initializeEvenDisplay().catch(() => undefined);
 commit(state);
+initializeEvenIntegration().catch(() => updateEvenInputBinding('failed', 'Even integration startup failed.'));
 bootstrap().catch((error) => {
-  console.warn('[config]', error);
+  void error;
   commit({
     ...openSettings(state, emptySettings(), 'Could not load settings.'),
     runtimeStatus: markConfigured(state.runtimeStatus, false),
@@ -484,4 +423,21 @@ bootstrap().catch((error) => {
       lastError: 'Could not load settings.'
     }
   });
+});
+
+window.addEventListener('pagehide', () => {
+  evenInputUnsubscribe?.();
+  evenInputUnsubscribe = null;
+  evenDisplay = null;
+  state = {
+    ...state,
+    debug: {
+      ...state.debug,
+      evenInputBinding: {
+        status: 'stopped',
+        detail: 'Input handler released.',
+        updatedAt: new Date().toISOString()
+      }
+    }
+  };
 });

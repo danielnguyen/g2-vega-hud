@@ -1,7 +1,7 @@
 import type { RuntimeStatus } from './runtimeStatus';
 import type { RuntimeSettings } from './settings';
 import type { AppState, DebugState, GatewayPageResponse } from './types';
-import { MODES } from './types';
+import { initialG2Navigation, transitionG2Navigation } from './navigation';
 
 export function initialState(
   configured: boolean,
@@ -10,6 +10,7 @@ export function initialState(
   debug: DebugState
 ): AppState {
   return {
+    glassesNavigation: initialG2Navigation(),
     screen: configured ? 'home' : 'settings',
     selectedModeIndex: 0,
     pageIndex: 0,
@@ -24,8 +25,12 @@ export function initialState(
 }
 
 export function moveSelection(state: AppState, delta: number): AppState {
-  const nextIndex = wrap(state.selectedModeIndex + delta, MODES.length);
-  return { ...state, selectedModeIndex: nextIndex };
+  const transition = transitionG2Navigation(state.glassesNavigation, { type: 'move-selection', delta });
+  return {
+    ...state,
+    selectedModeIndex: transition.state.selectedIndex,
+    glassesNavigation: transition.state
+  };
 }
 
 export function showLoading(state: AppState): AppState {

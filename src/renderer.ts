@@ -5,8 +5,8 @@ import {
   PAGES_FOOTER
 } from './constants';
 import type { RuntimeStatus } from './runtimeStatus';
-import type { AppState, GatewayRequestDebug, GlassesInputDebugEvent } from './types';
-import { MODES } from './types';
+import { G2_HOME_ITEMS } from './navigation';
+import type { AppState, EvenInputBindingDebug, GatewayRequestDebug, GlassesInputDebugEvent } from './types';
 
 export function render(root: HTMLElement, state: AppState): void {
   root.innerHTML = '';
@@ -50,10 +50,10 @@ function renderHome(state: AppState): HTMLElement {
   const list = document.createElement('div');
   list.className = 'mode-list';
 
-  MODES.forEach((item, index) => {
+  G2_HOME_ITEMS.forEach((item, index) => {
     const row = document.createElement('button');
-    row.className = index === state.selectedModeIndex ? 'mode selected' : 'mode';
-    row.textContent = `${index === state.selectedModeIndex ? '>' : ' '} ${item.label}`;
+    row.className = index === state.glassesNavigation.selectedIndex ? 'mode selected' : 'mode';
+    row.textContent = `${index === state.glassesNavigation.selectedIndex ? '>' : ' '} ${item.label}`;
     row.type = 'button';
     row.dataset.modeIndex = String(index);
     list.appendChild(row);
@@ -65,7 +65,7 @@ function renderHome(state: AppState): HTMLElement {
 }
 
 function renderLoading(state: AppState): HTMLElement {
-  const selected = MODES[state.selectedModeIndex];
+  const selected = G2_HOME_ITEMS[state.glassesNavigation.selectedIndex];
   const section = document.createElement('section');
   section.className = 'screen center';
   section.appendChild(title(selected?.label ?? 'VEGA'));
@@ -149,7 +149,20 @@ function renderDebugPanel(state: AppState): HTMLElement {
   section.appendChild(renderStatusRow('App version', state.debug.appVersion));
   section.appendChild(renderStatusRow('Gateway URL', state.debug.currentSettings.gatewayUrl || 'Not configured'));
   section.appendChild(renderStatusRow('Auth token', redactAuthValue(state.debug.currentSettings.authValue)));
-  section.appendChild(renderStatusRow('Last input', formatGlassesInput(state.debug.lastGlassesInputEvent)));
+  section.appendChild(
+    renderStatusRow(
+      'Glasses input',
+      formatInputBinding(state.debug.evenInputBinding),
+      state.debug.evenInputBinding.status === 'failed' ? 'warning' : 'default'
+    )
+  );
+  section.appendChild(
+    renderStatusRow(
+      'Last input',
+      formatGlassesInput(state.debug.lastGlassesInputEvent),
+      state.debug.lastGlassesInputEvent?.handling === 'duplicate' ? 'warning' : 'default'
+    )
+  );
   section.appendChild(renderStatusRow('Last request', formatGatewayRequest(state.debug.lastGatewayRequest)));
   section.appendChild(renderStatusRow('Last error', state.debug.lastError ?? 'None', state.debug.lastError ? 'warning' : 'default'));
   return section;
@@ -211,12 +224,16 @@ function connectionLabel(connected: boolean | null): string {
   return 'Unknown';
 }
 
+function formatInputBinding(binding: EvenInputBindingDebug): string {
+  return `${binding.status} / ${binding.detail} / ${formatTimestamp(binding.updatedAt)}`;
+}
+
 function formatGlassesInput(event: GlassesInputDebugEvent | null): string {
   if (!event) {
     return 'None';
   }
 
-  return `${event.summary} • ${formatTimestamp(event.timestamp)}`;
+  return `${event.summary} / ${event.handling} / ${formatTimestamp(event.timestamp)}`;
 }
 
 function formatGatewayRequest(request: GatewayRequestDebug | null): string {

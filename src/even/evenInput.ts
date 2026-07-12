@@ -1,42 +1,39 @@
-import { OsEventTypeList, waitForEvenAppBridge, type EvenHubEvent } from '@evenrealities/even_hub_sdk';
+import { OsEventTypeList, type EvenHubEvent } from '@evenrealities/even_hub_sdk';
 import type { InputEventName } from '../input';
 import type { GlassesInputDebugEvent } from '../types';
 
-type EvenInputBridgeLike = {
+export type EvenInputBridge = {
   onEvenHubEvent(callback: (event: EvenHubEvent) => void): () => void;
 };
 
 export type NormalizedEvenInputEvent = GlassesInputDebugEvent & {
   mappedAction: InputEventName | null;
+  dedupeKey: string;
 };
 
-export async function bindEvenInput(
-  handler: (event: NormalizedEvenInputEvent) => void,
-  timeoutMs = 1500
-): Promise<(() => void) | null> {
-  try {
-    const bridge = await withTimeout(waitForEvenAppBridge(), timeoutMs);
-    const unsubscribe = (bridge as unknown as EvenInputBridgeLike).onEvenHubEvent((event) => {
-      handler(normalizeEvenHubEvent(event));
-    });
-
-    return unsubscribe;
-  } catch {
-    return null;
-  }
+export function bindEvenInput(
+  bridge: EvenInputBridge,
+  handler: (event: NormalizedEvenInputEvent) => void
+): () => void {
+  return bridge.onEvenHubEvent((event) => handler(normalizeEvenHubEvent(event)));
 }
 
 function normalizeEvenHubEvent(event: EvenHubEvent): NormalizedEvenInputEvent {
   const timestamp = new Date().toISOString();
+  const listEvent = event.listEvent;
   const sysEvent = event.sysEvent;
   const textEvent = event.textEvent;
+  const listType = listEvent?.eventType;
   const sysType = sysEvent?.eventType;
   const textType = textEvent?.eventType;
-  const channel = textEvent ? 'textEvent' : sysEvent ? 'sysEvent' : 'unknown';
-  const type = textType ?? sysType;
+  const channel = listEvent ? 'listEvent' : textEvent ? 'textEvent' : sysEvent ? 'sysEvent' : 'unknown';
+  const type = listType ?? textType ?? sysType;
   const eventType = eventTypeLabel(type);
-  const mappedAction = mapEvenHubEvent(textType, sysType, Boolean(textEvent), Boolean(sysEvent));
-  const target = textEvent?.containerName ?? null;
+  const mappedAction = mapEvenHubEvent(listType, textType, sysType, Boolean(listEvent), Boolean(textEvent), Boolean(sysEvent));
+  const target = listEvent?.containerName ?? textEvent?.containerName ?? null;
+  const selectedIndex = Number.isInteger(listEvent?.currentSelectItemIndex)
+    ? (listEvent?.currentSelectItemIndex ?? null)
+    : null;
   const eventSource = eventSourceLabel(sysEvent?.eventSource);
   const summaryParts = [channel, eventType];
 
@@ -52,22 +49,6 @@ function normalizeEvenHubEvent(event: EvenHubEvent): NormalizedEvenInputEvent {
     summaryParts.push(`[${eventSource}]`);
   }
 
-  console.debug('[even-input]', {
-    channel,
-    mappedAction,
-    sysType: sysType ?? null,
-    textType: textType ?? null,
-    event
-  });
-
-  if (isLifecycleEvent(sysType) || isLifecycleEvent(textType)) {
-    console.debug('[even-input] lifecycle', {
-      sysType: sysType ?? null,
-      textType: textType ?? null,
-      event
-    });
-  }
-
   return {
     timestamp,
     channel,
@@ -75,27 +56,38 @@ function normalizeEvenHubEvent(event: EvenHubEvent): NormalizedEvenInputEvent {
     mappedAction,
     eventSource,
     target,
-    summary: summaryParts.join(' ')
+    selectedIndex,
+    summary: summaryParts.join(' '),
+    handling: mappedAction ? 'accepted' : 'ignored',
+    dedupeKey: inputDedupeKey(mappedAction, selectedIndex)
   };
 }
 
 function mapEvenHubEvent(
+  listType: OsEventTypeList | undefined,
   textType: OsEventTypeList | undefined,
   sysType: OsEventTypeList | undefined,
+  hasListEvent: boolean,
   hasTextEvent: boolean,
   hasSysEvent: boolean
 ): InputEventName | null {
-  if (sysType === OsEventTypeList.DOUBLE_CLICK_EVENT || textType === OsEventTypeList.DOUBLE_CLICK_EVENT) {
+  if (
+    listType === OsEventTypeList.DOUBLE_CLICK_EVENT ||
+    sysType === OsEventTypeList.DOUBLE_CLICK_EVENT ||
+    textType === OsEventTypeList.DOUBLE_CLICK_EVENT
+  ) {
     return 'doublePress';
   }
 
-  if (textType === OsEventTypeList.SCROLL_TOP_EVENT) {
+  if (listType === OsEventTypeList.SCROLL_TOP_EVENT || textType === OsEventTypeList.SCROLL_TOP_EVENT) {
     return 'up';
   }
 
-  if (textType === OsEventTypeList.SCROLL_BOTTOM_EVENT) {
+  if (listType === OsEventTypeList.SCROLL_BOTTOM_EVENT || textType === OsEventTypeList.SCROLL_BOTTOM_EVENT) {
     return 'down';
   }
+
+  if (hasListEvent && (listType ?? OsEventTypeList.CLICK_EVENT) === OsEventTypeList.CLICK_EVENT) return 'press';
 
   if (hasTextEvent && (textType ?? OsEventTypeList.CLICK_EVENT) === OsEventTypeList.CLICK_EVENT) {
     return 'press';
@@ -106,6 +98,12 @@ function mapEvenHubEvent(
   }
 
   return null;
+}
+
+function inputDedupeKey(action: InputEventName | null, selectedIndex: number | null): string {
+  if (!action) return 'ignored';
+  if (action === 'doublePress') return action;
+  return `${action}:${selectedIndex ?? 'none'}`;
 }
 
 function eventTypeLabel(eventType: OsEventTypeList | undefined): string {
@@ -145,30 +143,5 @@ function eventSourceLabel(eventSource: number | undefined): string | null {
       return 'glasses-left';
     default:
       return null;
-  }
-}
-
-function isLifecycleEvent(eventType: OsEventTypeList | undefined): boolean {
-  return (
-    eventType === OsEventTypeList.FOREGROUND_ENTER_EVENT ||
-    eventType === OsEventTypeList.FOREGROUND_EXIT_EVENT ||
-    eventType === OsEventTypeList.ABNORMAL_EXIT_EVENT ||
-    eventType === OsEventTypeList.SYSTEM_EXIT_EVENT
-  );
-}
-
-async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
-  let timeoutId: ReturnType<typeof setTimeout> | undefined;
-
-  const timeout = new Promise<never>((_, reject) => {
-    timeoutId = setTimeout(() => reject(new Error('Even bridge unavailable')), timeoutMs);
-  });
-
-  try {
-    return await Promise.race([promise, timeout]);
-  } finally {
-    if (timeoutId) {
-      clearTimeout(timeoutId);
-    }
   }
 }
