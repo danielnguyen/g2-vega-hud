@@ -1,8 +1,11 @@
 import { waitForEvenAppBridge } from '@evenrealities/even_hub_sdk';
+import { retryBounded } from '../boundedRetry';
 
 export type EvenBridge = Awaited<ReturnType<typeof waitForEvenAppBridge>>;
 
 const DEFAULT_TIMEOUT_MS = 5000;
+const DEFAULT_ATTEMPTS = 3;
+const DEFAULT_RETRY_DELAY_MS = 150;
 let bridgePromise: Promise<EvenBridge> | null = null;
 
 export function getEvenBridge(timeoutMs = DEFAULT_TIMEOUT_MS): Promise<EvenBridge> {
@@ -14,6 +17,18 @@ export function getEvenBridge(timeoutMs = DEFAULT_TIMEOUT_MS): Promise<EvenBridg
   }
 
   return bridgePromise;
+}
+
+export function waitForEvenBridge(
+  timeoutMs = DEFAULT_TIMEOUT_MS,
+  attempts = DEFAULT_ATTEMPTS,
+  retryDelayMs = DEFAULT_RETRY_DELAY_MS
+): Promise<EvenBridge> {
+  return retryBounded(() => getEvenBridge(timeoutMs), { attempts, delayMs: retryDelayMs });
+}
+
+export function resetEvenBridge(): void {
+  bridgePromise = null;
 }
 
 async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {

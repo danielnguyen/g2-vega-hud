@@ -2,11 +2,14 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { DUPLICATE_EVENT_WINDOW_MS, filterDuplicateInput } from './inputDedupe.ts';
 
-test('an exact firmware duplicate inside the bounded window is suppressed', () => {
-  const first = filterDuplicateInput(null, { key: 'doublePress', receivedAt: 1000 });
-  const duplicate = filterDuplicateInput(first.state, { key: 'doublePress', receivedAt: 1050 });
+test('an entire exact-duplicate burst is suppressed', () => {
+  const first = filterDuplicateInput(null, { key: 'doublePress', receivedAt: 0 });
+  const second = filterDuplicateInput(first.state, { key: 'doublePress', receivedAt: 100 });
+  const third = filterDuplicateInput(second.state, { key: 'doublePress', receivedAt: 200 });
   assert.equal(first.accepted, true);
-  assert.equal(duplicate.accepted, false);
+  assert.equal(second.accepted, false);
+  assert.equal(third.accepted, false);
+  assert.equal(third.state?.receivedAt, 200);
 });
 
 test('different rapid actions are preserved', () => {
@@ -15,11 +18,12 @@ test('different rapid actions are preserved', () => {
   assert.equal(second.accepted, true);
 });
 
-test('intentional repeated input after the narrow window is preserved', () => {
-  const first = filterDuplicateInput(null, { key: 'press:0', receivedAt: 1000 });
-  const repeated = filterDuplicateInput(first.state, {
+test('the same action is accepted after a quiet period', () => {
+  const first = filterDuplicateInput(null, { key: 'press:0', receivedAt: 0 });
+  const duplicate = filterDuplicateInput(first.state, { key: 'press:0', receivedAt: 100 });
+  const afterQuiet = filterDuplicateInput(duplicate.state, {
     key: 'press:0',
-    receivedAt: 1000 + DUPLICATE_EVENT_WINDOW_MS + 1
+    receivedAt: 100 + DUPLICATE_EVENT_WINDOW_MS + 1
   });
-  assert.equal(repeated.accepted, true);
+  assert.equal(afterQuiet.accepted, true);
 });

@@ -9,7 +9,10 @@ export type EvenInputBridge = {
 export type NormalizedEvenInputEvent = GlassesInputDebugEvent & {
   mappedAction: InputEventName | null;
   dedupeKey: string;
+  lifecycleEvent: EvenLifecycleEvent | null;
 };
+
+export type EvenLifecycleEvent = 'foreground-enter' | 'foreground-exit' | 'abnormal-exit' | 'system-exit';
 
 export function bindEvenInput(
   bridge: EvenInputBridge,
@@ -18,7 +21,7 @@ export function bindEvenInput(
   return bridge.onEvenHubEvent((event) => handler(normalizeEvenHubEvent(event)));
 }
 
-function normalizeEvenHubEvent(event: EvenHubEvent): NormalizedEvenInputEvent {
+export function normalizeEvenHubEvent(event: EvenHubEvent): NormalizedEvenInputEvent {
   const timestamp = new Date().toISOString();
   const listEvent = event.listEvent;
   const sysEvent = event.sysEvent;
@@ -29,11 +32,10 @@ function normalizeEvenHubEvent(event: EvenHubEvent): NormalizedEvenInputEvent {
   const channel = listEvent ? 'listEvent' : textEvent ? 'textEvent' : sysEvent ? 'sysEvent' : 'unknown';
   const type = listType ?? textType ?? sysType;
   const eventType = eventTypeLabel(type);
-  const mappedAction = mapEvenHubEvent(listType, textType, sysType, Boolean(listEvent), Boolean(textEvent), Boolean(sysEvent));
+  const mappedAction = mapEvenHubEvent(Boolean(listEvent), textType, sysType, Boolean(textEvent), Boolean(sysEvent));
+  const lifecycleEvent = classifyLifecycleEvent(sysType);
   const target = listEvent?.containerName ?? textEvent?.containerName ?? null;
-  const selectedIndex = Number.isInteger(listEvent?.currentSelectItemIndex)
-    ? (listEvent?.currentSelectItemIndex ?? null)
-    : null;
+  const selectedIndex = listEvent ? listEvent.currentSelectItemIndex ?? 0 : null;
   const eventSource = eventSourceLabel(sysEvent?.eventSource);
   const summaryParts = [channel, eventType];
 
@@ -59,45 +61,47 @@ function normalizeEvenHubEvent(event: EvenHubEvent): NormalizedEvenInputEvent {
     selectedIndex,
     summary: summaryParts.join(' '),
     handling: mappedAction ? 'accepted' : 'ignored',
-    dedupeKey: inputDedupeKey(mappedAction, selectedIndex)
+    dedupeKey: inputDedupeKey(mappedAction, selectedIndex),
+    lifecycleEvent
   };
 }
 
 function mapEvenHubEvent(
-  listType: OsEventTypeList | undefined,
+  hasListEvent: boolean,
   textType: OsEventTypeList | undefined,
   sysType: OsEventTypeList | undefined,
-  hasListEvent: boolean,
   hasTextEvent: boolean,
   hasSysEvent: boolean
 ): InputEventName | null {
-  if (
-    listType === OsEventTypeList.DOUBLE_CLICK_EVENT ||
-    sysType === OsEventTypeList.DOUBLE_CLICK_EVENT ||
-    textType === OsEventTypeList.DOUBLE_CLICK_EVENT
-  ) {
-    return 'doublePress';
-  }
+  if (hasListEvent) return 'press';
 
-  if (listType === OsEventTypeList.SCROLL_TOP_EVENT || textType === OsEventTypeList.SCROLL_TOP_EVENT) {
+  if (hasTextEvent && textType === OsEventTypeList.SCROLL_TOP_EVENT) {
     return 'up';
   }
 
-  if (listType === OsEventTypeList.SCROLL_BOTTOM_EVENT || textType === OsEventTypeList.SCROLL_BOTTOM_EVENT) {
+  if (hasTextEvent && textType === OsEventTypeList.SCROLL_BOTTOM_EVENT) {
     return 'down';
   }
 
-  if (hasListEvent && (listType ?? OsEventTypeList.CLICK_EVENT) === OsEventTypeList.CLICK_EVENT) return 'press';
-
-  if (hasTextEvent && (textType ?? OsEventTypeList.CLICK_EVENT) === OsEventTypeList.CLICK_EVENT) {
-    return 'press';
-  }
-
-  if (hasSysEvent && (sysType ?? OsEventTypeList.CLICK_EVENT) === OsEventTypeList.CLICK_EVENT) {
-    return 'press';
-  }
+  if (hasSysEvent && sysType === OsEventTypeList.DOUBLE_CLICK_EVENT) return 'doublePress';
+  if (hasSysEvent && (sysType ?? OsEventTypeList.CLICK_EVENT) === OsEventTypeList.CLICK_EVENT) return 'press';
 
   return null;
+}
+
+export function classifyLifecycleEvent(eventType: OsEventTypeList | undefined): EvenLifecycleEvent | null {
+  switch (eventType) {
+    case OsEventTypeList.FOREGROUND_ENTER_EVENT:
+      return 'foreground-enter';
+    case OsEventTypeList.FOREGROUND_EXIT_EVENT:
+      return 'foreground-exit';
+    case OsEventTypeList.ABNORMAL_EXIT_EVENT:
+      return 'abnormal-exit';
+    case OsEventTypeList.SYSTEM_EXIT_EVENT:
+      return 'system-exit';
+    default:
+      return null;
+  }
 }
 
 function inputDedupeKey(action: InputEventName | null, selectedIndex: number | null): string {

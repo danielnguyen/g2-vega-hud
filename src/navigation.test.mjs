@@ -29,3 +29,10 @@ test('selection changes are ignored on child screens', () => {
   const moved = transitionG2Navigation(selected.state, { type: 'move-selection', delta: 1 });
   assert.deepEqual(moved.state, child);
 });
+
+test('an explicit first-item selection overrides stale home selection', () => {
+  const stale = { route: 'home', selectedIndex: 1 };
+  const selected = transitionG2Navigation(stale, { type: 'select', index: 0 });
+  const opened = transitionG2Navigation(selected.state, { type: 'open-selected' });
+  assert.equal(opened.state.route, 'dashboard');
+});

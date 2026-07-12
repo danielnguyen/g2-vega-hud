@@ -1,7 +1,7 @@
 import { configFromSettings, loadConfig, loadEnvConfig, type AppConfig } from './config';
-import { getEvenBridge } from './even/evenBridge';
+import { resetEvenBridge, waitForEvenBridge } from './even/evenBridge';
 import { createEvenDisplay, type EvenDisplay } from './even/evenDisplay';
-import { bindEvenInput, type NormalizedEvenInputEvent } from './even/evenInput';
+import { bindEvenInput, type EvenLifecycleEvent, type NormalizedEvenInputEvent } from './even/evenInput';
 import { sendTurn } from './gatewayClient';
 import { bindKeyboardInput, type InputEventName } from './input';
 import { filterDuplicateInput, type InputDedupeState } from './inputDedupe';
@@ -16,7 +16,7 @@ import {
   moveSelection,
   openSettings
 } from './state';
-import type { AppState, DebugState, EvenInputBindingDebug } from './types';
+import type { AppState, DebugState, EvenInputBindingDebug, EvenLifecycleDebug } from './types';
 import { APP_VERSION } from './version';
 import './style.css';
 
@@ -36,6 +36,7 @@ let evenDisplay: EvenDisplay | null = null;
 let evenInputUnsubscribe: (() => void) | null = null;
 let config: AppConfig | null = null;
 let inputDedupeState: InputDedupeState = null;
+let evenIntegrationCleaned = false;
 
 function commit(nextState: AppState): void {
   state = nextState;
@@ -127,14 +128,22 @@ function handleEvenInput(event: NormalizedEvenInputEvent): void {
     handling: !event.mappedAction ? 'ignored' : dedupe.accepted ? 'accepted' : 'duplicate'
   };
 
-  commit({
+  const nextState = {
     ...state,
     settingsDraft,
     debug: {
       ...state.debug,
       lastGlassesInputEvent: handledEvent
     }
-  });
+  };
+
+  if (handledEvent.lifecycleEvent) {
+    commitPhoneState(nextState);
+    handleEvenLifecycle(handledEvent.lifecycleEvent);
+    return;
+  }
+
+  commit(nextState);
 
   if (handledEvent.mappedAction && handledEvent.handling === 'accepted') {
     handleInput(handledEvent.mappedAction, handledEvent.selectedIndex);
@@ -142,20 +151,76 @@ function handleEvenInput(event: NormalizedEvenInputEvent): void {
 }
 
 async function initializeEvenIntegration(): Promise<void> {
+  evenIntegrationCleaned = false;
   updateEvenInputBinding('binding', 'Waiting for shared Even bridge.');
 
   try {
-    const bridge = await getEvenBridge();
-    evenDisplay = await createEvenDisplay(bridge);
+    const bridge = await waitForEvenBridge();
+    if (evenIntegrationCleaned) return;
+
+    const display = await createEvenDisplay(bridge);
+    if (evenIntegrationCleaned) return;
+
+    evenDisplay = display;
     evenInputUnsubscribe?.();
     evenInputUnsubscribe = bindEvenInput(bridge, handleEvenInput);
     updateEvenInputBinding('ready', 'Bound to shared Even bridge.');
+    updateEvenLifecycle('foreground', 'Integration active.');
   } catch {
+    if (evenIntegrationCleaned) return;
     evenDisplay = null;
     evenInputUnsubscribe?.();
     evenInputUnsubscribe = null;
+    resetEvenBridge();
     updateEvenInputBinding('failed', 'Even bridge or input binding unavailable.');
   }
+}
+
+function handleEvenLifecycle(event: EvenLifecycleEvent): void {
+  if (event === 'foreground-enter') {
+    updateEvenLifecycle('foreground', 'Foreground entered.');
+    evenDisplay?.render(state.glassesNavigation).catch(() => recordEvenFailure('Even display update failed.'));
+    return;
+  }
+
+  if (event === 'foreground-exit') {
+    updateEvenLifecycle('background', 'Foreground exited.');
+    return;
+  }
+
+  cleanupEvenIntegration(event === 'system-exit' ? 'System exit received.' : 'Abnormal exit received.');
+}
+
+function cleanupEvenIntegration(detail: string): void {
+  if (evenIntegrationCleaned) return;
+  evenIntegrationCleaned = true;
+
+  const unsubscribe = evenInputUnsubscribe;
+  evenInputUnsubscribe = null;
+  try {
+    unsubscribe?.();
+  } catch {
+    // Cleanup remains conservative and idempotent even if the host handler throws.
+  }
+  evenDisplay = null;
+  inputDedupeState = null;
+  resetEvenBridge();
+  commitPhoneState({
+    ...state,
+    debug: {
+      ...state.debug,
+      evenInputBinding: {
+        status: 'stopped',
+        detail: 'Input handler released.',
+        updatedAt: new Date().toISOString()
+      },
+      evenLifecycle: {
+        status: 'terminated',
+        detail,
+        updatedAt: new Date().toISOString()
+      }
+    }
+  });
 }
 
 function applyNavigation(action: G2NavigationAction): void {
@@ -181,17 +246,31 @@ function updateEvenInputBinding(status: EvenInputBindingDebug['status'], detail:
   });
 }
 
+function updateEvenLifecycle(status: EvenLifecycleDebug['status'], detail: string): void {
+  commitPhoneState({
+    ...state,
+    debug: {
+      ...state.debug,
+      evenLifecycle: { status, detail, updatedAt: new Date().toISOString() }
+    }
+  });
+}
+
+function commitPhoneState(nextState: AppState): void {
+  state = nextState;
+  render(appRoot, state);
+  bindModeClicks();
+  bindSettingsControls();
+}
+
 function recordEvenFailure(detail: string): void {
-  state = {
+  commitPhoneState({
     ...state,
     debug: {
       ...state.debug,
       evenInputBinding: { status: 'failed', detail, updatedAt: new Date().toISOString() }
     }
-  };
-  render(appRoot, state);
-  bindModeClicks();
-  bindSettingsControls();
+  });
 }
 
 function toUserErrorMessage(error: unknown): string {
@@ -394,6 +473,11 @@ function buildDebugState(currentSettings: RuntimeSettings, previous?: Partial<De
       detail: 'Not started.',
       updatedAt: new Date().toISOString()
     },
+    evenLifecycle: previous?.evenLifecycle ?? {
+      status: 'idle',
+      detail: 'No lifecycle event received.',
+      updatedAt: new Date().toISOString()
+    },
     lastGlassesInputEvent: previous?.lastGlassesInputEvent ?? null,
     lastGatewayRequest: previous?.lastGatewayRequest ?? null,
     lastError: previous?.lastError ?? null
@@ -426,18 +510,5 @@ bootstrap().catch((error) => {
 });
 
 window.addEventListener('pagehide', () => {
-  evenInputUnsubscribe?.();
-  evenInputUnsubscribe = null;
-  evenDisplay = null;
-  state = {
-    ...state,
-    debug: {
-      ...state.debug,
-      evenInputBinding: {
-        status: 'stopped',
-        detail: 'Input handler released.',
-        updatedAt: new Date().toISOString()
-      }
-    }
-  };
+  cleanupEvenIntegration('Page hidden.');
 });

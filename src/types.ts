@@ -42,10 +42,17 @@ export type EvenInputBindingDebug = {
   updatedAt: string;
 };
 
+export type EvenLifecycleDebug = {
+  status: 'idle' | 'foreground' | 'background' | 'terminated';
+  detail: string;
+  updatedAt: string;
+};
+
 export type DebugState = {
   appVersion: string;
   currentSettings: RuntimeSettings;
   evenInputBinding: EvenInputBindingDebug;
+  evenLifecycle: EvenLifecycleDebug;
   lastGlassesInputEvent: GlassesInputDebugEvent | null;
   lastGatewayRequest: GatewayRequestDebug | null;
   lastError: string | null;

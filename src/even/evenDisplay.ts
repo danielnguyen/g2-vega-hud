@@ -7,6 +7,7 @@ import {
   TextContainerUpgrade
 } from '@evenrealities/even_hub_sdk';
 import { G2_HOME_ITEMS, type G2NavigationState, type G2Route } from '../navigation';
+import { RecoverableSerialQueue } from '../serialQueue';
 import type { EvenBridge } from './evenBridge';
 
 const HOME_LIST_ID = 1;
@@ -30,7 +31,7 @@ export async function createEvenDisplay(bridge: EvenBridge): Promise<EvenDisplay
 class EvenGlassesDisplay implements EvenDisplay {
   private containerKind: ContainerKind | null = null;
   private renderedRoute: G2Route | null = null;
-  private renderQueue: Promise<void> = Promise.resolve();
+  private readonly renderQueue = new RecoverableSerialQueue();
 
   constructor(private readonly bridge: EvenBridge) {}
 
@@ -45,8 +46,7 @@ class EvenGlassesDisplay implements EvenDisplay {
   }
 
   render(navigation: G2NavigationState): Promise<void> {
-    this.renderQueue = this.renderQueue.then(() => this.performRender(navigation));
-    return this.renderQueue;
+    return this.renderQueue.run(() => this.performRender(navigation));
   }
 
   requestHostExit(): Promise<boolean> {

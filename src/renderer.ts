@@ -6,7 +6,13 @@ import {
 } from './constants';
 import type { RuntimeStatus } from './runtimeStatus';
 import { G2_HOME_ITEMS } from './navigation';
-import type { AppState, EvenInputBindingDebug, GatewayRequestDebug, GlassesInputDebugEvent } from './types';
+import type {
+  AppState,
+  EvenInputBindingDebug,
+  EvenLifecycleDebug,
+  GatewayRequestDebug,
+  GlassesInputDebugEvent
+} from './types';
 
 export function render(root: HTMLElement, state: AppState): void {
   root.innerHTML = '';
@@ -156,6 +162,7 @@ function renderDebugPanel(state: AppState): HTMLElement {
       state.debug.evenInputBinding.status === 'failed' ? 'warning' : 'default'
     )
   );
+  section.appendChild(renderStatusRow('Glasses lifecycle', formatLifecycle(state.debug.evenLifecycle)));
   section.appendChild(
     renderStatusRow(
       'Last input',
@@ -226,6 +233,10 @@ function connectionLabel(connected: boolean | null): string {
 
 function formatInputBinding(binding: EvenInputBindingDebug): string {
   return `${binding.status} / ${binding.detail} / ${formatTimestamp(binding.updatedAt)}`;
+}
+
+function formatLifecycle(lifecycle: EvenLifecycleDebug): string {
+  return `${lifecycle.status} / ${lifecycle.detail} / ${formatTimestamp(lifecycle.updatedAt)}`;
 }
 
 function formatGlassesInput(event: GlassesInputDebugEvent | null): string {

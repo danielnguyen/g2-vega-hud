@@ -21,7 +21,7 @@ export function filterDuplicateInput(
   const duplicate = previous?.key === current.key && elapsed >= 0 && elapsed <= windowMs;
 
   if (duplicate) {
-    return { accepted: false, state: previous };
+    return { accepted: false, state: current };
   }
 
   return { accepted: true, state: current };
