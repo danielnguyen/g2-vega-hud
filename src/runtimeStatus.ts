@@ -1,11 +1,11 @@
-import type { Mode } from './types';
+export type RuntimeOperation = 'conversation' | 'status-check';
 
 export type RuntimeStatus = {
   configured: boolean;
   connected: boolean | null;
   lastCheckedAt: string | null;
   lastRequestAt: string | null;
-  lastMode: Mode | null;
+  lastOperation: RuntimeOperation | null;
   lastStatus: 'ok' | 'degraded' | 'failed' | null;
   lastError: string | null;
 };
@@ -16,7 +16,7 @@ export function initialRuntimeStatus(configured: boolean): RuntimeStatus {
     connected: null,
     lastCheckedAt: null,
     lastRequestAt: null,
-    lastMode: null,
+    lastOperation: null,
     lastStatus: null,
     lastError: null
   };
@@ -42,7 +42,7 @@ export function markConnectionCheck(
     return {
       ...status,
       lastCheckedAt: now,
-      lastMode: 'status',
+      lastOperation: 'status-check',
       lastError: null
     };
   }
@@ -52,7 +52,7 @@ export function markConnectionCheck(
       ...status,
       connected: true,
       lastCheckedAt: now,
-      lastMode: 'status',
+      lastOperation: 'status-check',
       lastStatus: nextStatus ?? 'ok',
       lastError: null
     };
@@ -62,41 +62,40 @@ export function markConnectionCheck(
     ...status,
     connected: false,
     lastCheckedAt: now,
-    lastMode: 'status',
+    lastOperation: 'status-check',
     lastStatus: 'failed',
     lastError: error ?? 'Gateway request failed.'
   };
 }
 
-export function markRequestStart(status: RuntimeStatus, mode: Mode): RuntimeStatus {
+export function markRequestStart(status: RuntimeStatus): RuntimeStatus {
   return {
     ...status,
-    lastMode: mode,
+    lastOperation: 'conversation',
     lastError: null
   };
 }
 
 export function markRequestSuccess(
   status: RuntimeStatus,
-  mode: Mode,
   requestStatus: RuntimeStatus['lastStatus']
 ): RuntimeStatus {
   return {
     ...status,
     connected: true,
     lastRequestAt: new Date().toISOString(),
-    lastMode: mode,
+    lastOperation: 'conversation',
     lastStatus: requestStatus ?? 'ok',
     lastError: null
   };
 }
 
-export function markRequestFailure(status: RuntimeStatus, mode: Mode, error: string): RuntimeStatus {
+export function markRequestFailure(status: RuntimeStatus, error: string): RuntimeStatus {
   return {
     ...status,
     connected: false,
     lastRequestAt: new Date().toISOString(),
-    lastMode: mode,
+    lastOperation: 'conversation',
     lastStatus: 'failed',
     lastError: error
   };

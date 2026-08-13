@@ -18,6 +18,7 @@
     "node": ">=22"
   },
   "dependencies": {
+    "@deepgram/sdk": "5.8.0",
     "@evenrealities/even_hub_sdk": "^0.0.10"
   },
   "devDependencies": {
