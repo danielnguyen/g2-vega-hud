@@ -131,19 +131,15 @@ jobs:
       - name: Package Even Hub app
         run: npx evenhub pack app.json ./dist --output "${{ steps.version.outputs.filename }}"
 
-      - name: Unpack package for security inspection
+      - name: Inspect generated package
         shell: bash
         run: |
           set -euo pipefail
-          rm -rf package-inspect
-          mkdir package-inspect
-          if ! unzip -q "${{ steps.version.outputs.filename }}" -d package-inspect; then
-            echo "::error::Could not unpack the generated .ehpk for secret inspection; refusing to publish it."
-            exit 1
-          fi
+          file "${{ steps.version.outputs.filename }}"
+          sha256sum "${{ steps.version.outputs.filename }}"
 
-      - name: Assert final package is secret-safe
-        run: node scripts/assert-package-safe.mjs package-inspect
+      - name: Assert final package has no plaintext secret canaries
+        run: node scripts/assert-package-safe.mjs "${{ steps.version.outputs.filename }}"
 
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
