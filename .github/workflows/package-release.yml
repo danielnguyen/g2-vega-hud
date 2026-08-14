@@ -60,18 +60,15 @@ jobs:
             exit 1
           fi
 
-      - name: Generate release manifest
+      - name: Generate synchronized release metadata
         env:
           RELEASE_VERSION: ${{ steps.version.outputs.version }}
         run: |
           node <<'NODE'
           const fs = require('node:fs');
 
-          const sourcePath = 'app.json.example';
-          const targetPath = 'app.json';
           const gatewayRaw = (process.env.VEGA_GATEWAY_URL || '').trim();
           const releaseVersion = process.env.RELEASE_VERSION;
-
           if (!gatewayRaw || !releaseVersion) {
             throw new Error('Missing VEGA_GATEWAY_URL or RELEASE_VERSION');
           }
@@ -83,11 +80,21 @@ jobs:
           if (gatewayUrl.username || gatewayUrl.password || gatewayUrl.search || gatewayUrl.hash) {
             throw new Error('VEGA_GATEWAY_URL must not contain credentials, query parameters, or fragments');
           }
-
           const normalizedGateway = gatewayRaw.replace(/\/$/, '');
-          const manifest = JSON.parse(fs.readFileSync(sourcePath, 'utf8'));
-          manifest.version = releaseVersion;
 
+          const packageJson = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+          packageJson.version = releaseVersion;
+          fs.writeFileSync('package.json', `${JSON.stringify(packageJson, null, 2)}\n`);
+
+          const packageLock = JSON.parse(fs.readFileSync('package-lock.json', 'utf8'));
+          packageLock.version = releaseVersion;
+          if (packageLock.packages?.['']) {
+            packageLock.packages[''].version = releaseVersion;
+          }
+          fs.writeFileSync('package-lock.json', `${JSON.stringify(packageLock, null, 2)}\n`);
+
+          const manifest = JSON.parse(fs.readFileSync('app.json.example', 'utf8'));
+          manifest.version = releaseVersion;
           const networkPermission = manifest.permissions?.find((permission) => permission.name === 'network');
           if (!networkPermission || !Array.isArray(networkPermission.whitelist)) {
             throw new Error('app.json.example is missing the network whitelist');
@@ -107,7 +114,7 @@ jobs:
             throw new Error('g2-microphone permission is missing from the release manifest');
           }
 
-          fs.writeFileSync(targetPath, `${JSON.stringify(manifest, null, 2)}\n`);
+          fs.writeFileSync('app.json', `${JSON.stringify(manifest, null, 2)}\n`);
           NODE
 
       - name: Build packaged bundle with secret canaries
