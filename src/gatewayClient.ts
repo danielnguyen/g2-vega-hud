@@ -40,7 +40,11 @@ export async function createSttSession(
   const result = await fetchGatewayJson<unknown>(
     config,
     '/g2/stt/session',
-    { method: 'POST' },
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({})
+    },
     timeoutMs
   );
 

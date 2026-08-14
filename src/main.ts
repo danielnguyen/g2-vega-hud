@@ -215,6 +215,7 @@ async function startListening(): Promise<void> {
   };
   activeCapture = capture;
   commit(showConnecting(state));
+  let failureStage: 'bootstrap' | 'provider' = 'bootstrap';
 
   try {
     const bootstrap = await createSttSession(config);
@@ -222,6 +223,7 @@ async function startListening(): Promise<void> {
       return;
     }
 
+    failureStage = 'provider';
     const provider = createSpeechToTextProvider(bootstrap.provider);
     if (!provider) {
       throw new Error('unsupported_speech_provider');
@@ -256,7 +258,7 @@ async function startListening(): Promise<void> {
     }
 
     commit(showListening(state));
-  } catch {
+  } catch (error) {
     if (activeCapture !== capture) {
       return;
     }
@@ -267,7 +269,9 @@ async function startListening(): Promise<void> {
     commit(
       withDebugError(
         showError(state, 'Speech service unavailable.'),
-        'Speech service unavailable.'
+        failureStage === 'bootstrap'
+          ? sttBootstrapDebugMessage(error)
+          : 'STT provider connection failed.'
       )
     );
   }
@@ -302,7 +306,7 @@ async function failActiveCapture(capture: ActiveCapture): Promise<void> {
   commit(
     withDebugError(
       showError(state, 'Speech service unavailable.'),
-      'Speech service unavailable.'
+      'STT provider stream failed.'
     )
   );
 }
@@ -469,6 +473,31 @@ function toUserErrorMessage(error: unknown): string {
   }
 
   return 'Gateway request failed.';
+}
+
+function sttBootstrapDebugMessage(error: unknown): string {
+  if (!(error instanceof Error)) {
+    return 'STT bootstrap failed.';
+  }
+
+  const httpStatus = /^Gateway returned HTTP (\d+)$/.exec(error.message)?.[1];
+  if (httpStatus) {
+    return `STT bootstrap failed (HTTP ${httpStatus}).`;
+  }
+
+  if (error.message === 'Gateway timed out') {
+    return 'STT bootstrap timed out.';
+  }
+
+  if (error.message === 'Could not reach gateway') {
+    return 'STT bootstrap could not reach gateway.';
+  }
+
+  if (error.message === 'Invalid STT session response') {
+    return 'STT bootstrap returned an invalid response.';
+  }
+
+  return 'STT bootstrap failed.';
 }
 
 async function bootstrap(): Promise<void> {
