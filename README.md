@@ -101,6 +101,25 @@ If `app.json` is missing, packaging stops with:
 app.json is missing. Copy app.json.example to app.json and edit local values before packing.
 ```
 
+## Automated packaged releases
+
+`.github/workflows/package-release.yml` builds a deployable `.ehpk` without embedding the runtime gateway bearer token or a permanent Deepgram key.
+
+Configure one repository Actions variable before using it:
+
+```text
+VEGA_GATEWAY_URL=https://your-gateway-host.example
+```
+
+Set it under **Settings → Secrets and variables → Actions → Variables**. It is kept out of the checked-in manifest template, but it is not a credential: the final `.ehpk` must contain the gateway host in its Even Hub network whitelist, so anyone able to inspect the released package can discover that endpoint.
+
+The workflow runs in two modes:
+
+- **Run workflow** from the Actions tab: packages the current `package.json` version and uploads the `.ehpk` as a 30-day workflow artifact.
+- Push a version tag such as `v0.3.2`: uses the tag version in the generated manifest, uploads the workflow artifact, and creates or updates the matching GitHub Release with `vega-hud-0.3.2.ehpk` attached.
+
+The CI build intentionally injects fake `VITE_GATEWAY_URL` and `VITE_AUTH_VALUE` canaries while using `build:packaged`. Before publishing, it scans the built bundle and the unpacked `.ehpk`; publishing fails closed if those canaries, configured backend secrets, sensitive files, private-key material, or other high-signal secret patterns are found. The workflow itself is not given the real G2 gateway bearer token or permanent Deepgram API key.
+
 ## Manifest
 
 The checked-in template is `app.json.example`. Update the local `app.json` copy before device testing so the network whitelist matches your gateway host and any other machine-specific values are correct.
