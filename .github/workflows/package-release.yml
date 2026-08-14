@@ -1,0 +1,172 @@
+name: Package VEGA HUD
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    env:
+      VEGA_GATEWAY_URL: ${{ vars.VEGA_GATEWAY_URL }}
+      VEGA_SECRET_CANARY_AUTH: VEGA_CI_AUTH_CANARY_DO_NOT_SHIP_7f3c6d42b1e9
+      VEGA_SECRET_CANARY_GATEWAY: https://vega-ci-gateway-canary.invalid
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Resolve package version
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            version="${GITHUB_REF_NAME#v}"
+          else
+            version="$(node -e "console.log(JSON.parse(require('node:fs').readFileSync('package.json', 'utf8')).version)")"
+          fi
+
+          if [[ ! "${version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::Resolved version '${version}' is not a supported semantic version."
+            exit 1
+          fi
+
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+          echo "filename=vega-hud-${version}.ehpk" >> "${GITHUB_OUTPUT}"
+
+      - name: Validate release configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "${VEGA_GATEWAY_URL}" ]]; then
+            echo "::error::Repository variable VEGA_GATEWAY_URL is required for packaged builds."
+            echo "Set it under Settings > Secrets and variables > Actions > Variables."
+            exit 1
+          fi
+
+      - name: Generate synchronized release metadata
+        env:
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+
+          const gatewayRaw = (process.env.VEGA_GATEWAY_URL || '').trim();
+          const releaseVersion = process.env.RELEASE_VERSION;
+          if (!gatewayRaw || !releaseVersion) {
+            throw new Error('Missing VEGA_GATEWAY_URL or RELEASE_VERSION');
+          }
+
+          const gatewayUrl = new URL(gatewayRaw);
+          if (gatewayUrl.protocol !== 'https:') {
+            throw new Error('VEGA_GATEWAY_URL must use https');
+          }
+          if (gatewayUrl.username || gatewayUrl.password || gatewayUrl.search || gatewayUrl.hash) {
+            throw new Error('VEGA_GATEWAY_URL must not contain credentials, query parameters, or fragments');
+          }
+          const normalizedGateway = gatewayRaw.replace(/\/$/, '');
+
+          const packageJson = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+          packageJson.version = releaseVersion;
+          fs.writeFileSync('package.json', `${JSON.stringify(packageJson, null, 2)}\n`);
+
+          const packageLock = JSON.parse(fs.readFileSync('package-lock.json', 'utf8'));
+          packageLock.version = releaseVersion;
+          if (packageLock.packages?.['']) {
+            packageLock.packages[''].version = releaseVersion;
+          }
+          fs.writeFileSync('package-lock.json', `${JSON.stringify(packageLock, null, 2)}\n`);
+
+          const manifest = JSON.parse(fs.readFileSync('app.json.example', 'utf8'));
+          manifest.version = releaseVersion;
+          const networkPermission = manifest.permissions?.find((permission) => permission.name === 'network');
+          if (!networkPermission || !Array.isArray(networkPermission.whitelist)) {
+            throw new Error('app.json.example is missing the network whitelist');
+          }
+
+          networkPermission.whitelist = networkPermission.whitelist.map((entry) =>
+            entry === 'https://your-gateway-host.example' ? normalizedGateway : entry
+          );
+
+          if (!networkPermission.whitelist.includes(normalizedGateway)) {
+            throw new Error('Gateway placeholder was not replaced in the release manifest');
+          }
+          if (!networkPermission.whitelist.includes('wss://api.deepgram.com')) {
+            throw new Error('Deepgram WebSocket host is missing from the release manifest');
+          }
+          if (!manifest.permissions?.some((permission) => permission.name === 'g2-microphone')) {
+            throw new Error('g2-microphone permission is missing from the release manifest');
+          }
+
+          fs.writeFileSync('app.json', `${JSON.stringify(manifest, null, 2)}\n`);
+          NODE
+
+      - name: Build packaged bundle with secret canaries
+        env:
+          VITE_AUTH_VALUE: ${{ env.VEGA_SECRET_CANARY_AUTH }}
+          VITE_GATEWAY_URL: ${{ env.VEGA_SECRET_CANARY_GATEWAY }}
+        run: npm run build:packaged
+
+      - name: Assert bundle is secret-safe
+        run: node scripts/assert-package-safe.mjs dist app.json
+
+      - name: Package Even Hub app
+        run: npx evenhub pack app.json ./dist --output "${{ steps.version.outputs.filename }}"
+
+      - name: Unpack package for security inspection
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf package-inspect
+          mkdir package-inspect
+          if ! unzip -q "${{ steps.version.outputs.filename }}" -d package-inspect; then
+            echo "::error::Could not unpack the generated .ehpk for secret inspection; refusing to publish it."
+            exit 1
+          fi
+
+      - name: Assert final package is secret-safe
+        run: node scripts/assert-package-safe.mjs package-inspect
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: vega-hud-${{ steps.version.outputs.version }}
+          path: ${{ steps.version.outputs.filename }}
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Create or update GitHub Release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PACKAGE_FILE: ${{ steps.version.outputs.filename }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
+            gh release upload "${GITHUB_REF_NAME}" "${PACKAGE_FILE}" --clobber
+          else
+            gh release create "${GITHUB_REF_NAME}" "${PACKAGE_FILE}" \
+              --verify-tag \
+              --title "VEGA HUD ${GITHUB_REF_NAME}" \
+              --generate-notes
+          fi
