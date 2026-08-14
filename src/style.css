@@ -66,29 +66,6 @@ button {
   font: inherit;
 }
 
-.mode-list {
-  display: grid;
-  gap: 8px;
-  margin: 12px 0 16px;
-}
-
-.mode {
-  width: 100%;
-  padding: 4px 0;
-  border: 0;
-  background: transparent;
-  color: inherit;
-  text-align: left;
-  font: inherit;
-  font-size: 18px;
-  opacity: 0.7;
-}
-
-.mode.selected {
-  opacity: 1;
-  font-weight: 700;
-}
-
 .settings-link,
 .action-button {
   border: 1px solid rgba(255, 255, 255, 0.22);
@@ -96,6 +73,11 @@ button {
   background: rgba(255, 255, 255, 0.08);
   color: inherit;
   padding: 10px 12px;
+}
+
+.conversation-action {
+  width: 100%;
+  margin: 0 0 12px;
 }
 
 .settings-link {

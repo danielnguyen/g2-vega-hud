@@ -15,8 +15,13 @@
       "name": "network",
       "desc": "Connects to the private VEGA gateway.",
       "whitelist": [
-        "https://your-gateway-host.example"
+        "https://your-gateway-host.example",
+        "wss://api.deepgram.com"
       ]
+    },
+    {
+      "name": "g2-microphone",
+      "desc": "Captures G2 microphone audio for live transcription."
     }
   ]
 }

@@ -1,14 +1,15 @@
 import { waitForEvenAppBridge } from '@evenrealities/even_hub_sdk';
 import {
+  CONNECTING_FOOTER,
   ERROR_FOOTER,
   HOME_FOOTER,
-  LOADING_FOOTER,
+  LISTENING_FOOTER,
   PAGES_FOOTER,
   SETTINGS_FOOTER,
-  SETTINGS_REQUIRED_FOOTER
+  SETTINGS_REQUIRED_FOOTER,
+  THINKING_FOOTER
 } from '../constants';
 import type { AppState } from '../types';
-import { MODES } from '../types';
 import { APP_VERSION } from '../version';
 
 const TITLE_ID = 1;
@@ -108,19 +109,33 @@ function frameForState(state: AppState): Frame {
 
   if (state.screen === 'home') {
     return {
-      title: state.debug.appVersion,
-      body: MODES.map((item, index) => `${index === state.selectedModeIndex ? '>' : ' '} ${item.label}`).join('\n'),
+      title: 'CCP Conversation',
+      body: state.homeMessage ? `${state.homeMessage}\n\nTap to talk` : 'Tap to talk',
       help: HOME_FOOTER
     };
   }
 
-  if (state.screen === 'loading') {
-    const selected = MODES[state.selectedModeIndex];
-
+  if (state.screen === 'connecting') {
     return {
-      title: selected?.label ?? 'VEGA',
+      title: 'CCP Conversation',
+      body: 'Connecting...',
+      help: CONNECTING_FOOTER
+    };
+  }
+
+  if (state.screen === 'listening') {
+    return {
+      title: 'Listening...',
+      body: formatForGlasses(state.liveTranscript || 'Speak now'),
+      help: LISTENING_FOOTER
+    };
+  }
+
+  if (state.screen === 'thinking') {
+    return {
+      title: 'CCP Conversation',
       body: 'Thinking...',
-      help: LOADING_FOOTER
+      help: THINKING_FOOTER
     };
   }
 
@@ -133,7 +148,7 @@ function frameForState(state: AppState): Frame {
   }
 
   return {
-    title: 'Gateway error',
+    title: 'Conversation error',
     body: formatForGlasses(state.errorMessage ?? 'Unknown error'),
     help: ERROR_FOOTER
   };

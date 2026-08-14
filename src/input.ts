@@ -72,7 +72,7 @@ export function bindTouchInput(target: HTMLElement, handler: (eventName: InputEv
 
       if (elapsed <= 500 && absX < 20 && absY < 20) {
         const targetElement = event.target instanceof Element ? event.target : null;
-        if (targetElement?.closest('[data-mode-index]')) {
+        if (targetElement?.closest('[data-conversation-action], [data-settings-action]')) {
           return;
         }
 

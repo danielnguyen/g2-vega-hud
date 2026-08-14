@@ -4,23 +4,59 @@ import type { GlassesInputDebugEvent } from '../types';
 
 type EvenInputBridgeLike = {
   onEvenHubEvent(callback: (event: EvenHubEvent) => void): () => void;
+  audioControl(enabled: boolean): Promise<boolean>;
 };
 
 export type NormalizedEvenInputEvent = GlassesInputDebugEvent & {
   mappedAction: InputEventName | null;
 };
 
+export type EvenInputHandlers = {
+  onInput(event: NormalizedEvenInputEvent): void;
+  onPcm(chunk: Uint8Array): void;
+  onExit(): void;
+};
+
+export type EvenInputBinding = {
+  setMicrophoneEnabled(enabled: boolean): Promise<void>;
+  dispose(): void;
+};
+
 export async function bindEvenInput(
-  handler: (event: NormalizedEvenInputEvent) => void,
+  handlers: EvenInputHandlers,
   timeoutMs = 1500
-): Promise<(() => void) | null> {
+): Promise<EvenInputBinding | null> {
   try {
-    const bridge = await withTimeout(waitForEvenAppBridge(), timeoutMs);
-    const unsubscribe = (bridge as unknown as EvenInputBridgeLike).onEvenHubEvent((event) => {
-      handler(normalizeEvenHubEvent(event));
+    const bridge = (await withTimeout(
+      waitForEvenAppBridge(),
+      timeoutMs
+    )) as unknown as EvenInputBridgeLike;
+    const unsubscribe = bridge.onEvenHubEvent((event) => {
+      const pcm = event.audioEvent?.audioPcm;
+      if (pcm) {
+        handlers.onPcm(pcm);
+      }
+
+      if (!event.sysEvent && !event.textEvent) {
+        return;
+      }
+
+      const normalized = normalizeEvenHubEvent(event);
+      handlers.onInput(normalized);
+
+      if (isExitEvent(eventTypeOf(event.sysEvent), eventTypeOf(event.textEvent))) {
+        handlers.onExit();
+      }
     });
 
-    return unsubscribe;
+    return {
+      async setMicrophoneEnabled(enabled: boolean): Promise<void> {
+        await bridge.audioControl(enabled);
+      },
+      dispose(): void {
+        unsubscribe();
+      }
+    };
   } catch {
     return null;
   }
@@ -30,12 +66,12 @@ function normalizeEvenHubEvent(event: EvenHubEvent): NormalizedEvenInputEvent {
   const timestamp = new Date().toISOString();
   const sysEvent = event.sysEvent;
   const textEvent = event.textEvent;
-  const sysType = sysEvent?.eventType;
-  const textType = textEvent?.eventType;
+  const sysType = eventTypeOf(sysEvent);
+  const textType = eventTypeOf(textEvent);
   const channel = textEvent ? 'textEvent' : sysEvent ? 'sysEvent' : 'unknown';
   const type = textType ?? sysType;
   const eventType = eventTypeLabel(type);
-  const mappedAction = mapEvenHubEvent(textType, sysType, Boolean(textEvent), Boolean(sysEvent));
+  const mappedAction = mapEvenHubEvent(textType, sysType);
   const target = textEvent?.containerName ?? null;
   const eventSource = eventSourceLabel(sysEvent?.eventSource);
   const summaryParts = [channel, eventType];
@@ -52,22 +88,6 @@ function normalizeEvenHubEvent(event: EvenHubEvent): NormalizedEvenInputEvent {
     summaryParts.push(`[${eventSource}]`);
   }
 
-  console.debug('[even-input]', {
-    channel,
-    mappedAction,
-    sysType: sysType ?? null,
-    textType: textType ?? null,
-    event
-  });
-
-  if (isLifecycleEvent(sysType) || isLifecycleEvent(textType)) {
-    console.debug('[even-input] lifecycle', {
-      sysType: sysType ?? null,
-      textType: textType ?? null,
-      event
-    });
-  }
-
   return {
     timestamp,
     channel,
@@ -79,11 +99,19 @@ function normalizeEvenHubEvent(event: EvenHubEvent): NormalizedEvenInputEvent {
   };
 }
 
+// CLICK_EVENT is protobuf zero. Resolve that default only inside a real event
+// envelope so an audio-only frame can never be mistaken for a tap.
+function eventTypeOf(envelope?: { eventType?: OsEventTypeList }): OsEventTypeList | null {
+  if (!envelope) {
+    return null;
+  }
+
+  return envelope.eventType ?? OsEventTypeList.CLICK_EVENT;
+}
+
 function mapEvenHubEvent(
-  textType: OsEventTypeList | undefined,
-  sysType: OsEventTypeList | undefined,
-  hasTextEvent: boolean,
-  hasSysEvent: boolean
+  textType: OsEventTypeList | null,
+  sysType: OsEventTypeList | null
 ): InputEventName | null {
   if (sysType === OsEventTypeList.DOUBLE_CLICK_EVENT || textType === OsEventTypeList.DOUBLE_CLICK_EVENT) {
     return 'doublePress';
@@ -97,18 +125,14 @@ function mapEvenHubEvent(
     return 'down';
   }
 
-  if (hasTextEvent && (textType ?? OsEventTypeList.CLICK_EVENT) === OsEventTypeList.CLICK_EVENT) {
-    return 'press';
-  }
-
-  if (hasSysEvent && (sysType ?? OsEventTypeList.CLICK_EVENT) === OsEventTypeList.CLICK_EVENT) {
+  if (sysType === OsEventTypeList.CLICK_EVENT || textType === OsEventTypeList.CLICK_EVENT) {
     return 'press';
   }
 
   return null;
 }
 
-function eventTypeLabel(eventType: OsEventTypeList | undefined): string {
+function eventTypeLabel(eventType: OsEventTypeList | null): string {
   switch (eventType) {
     case OsEventTypeList.CLICK_EVENT:
       return 'CLICK_EVENT';
@@ -148,12 +172,15 @@ function eventSourceLabel(eventSource: number | undefined): string | null {
   }
 }
 
-function isLifecycleEvent(eventType: OsEventTypeList | undefined): boolean {
-  return (
-    eventType === OsEventTypeList.FOREGROUND_ENTER_EVENT ||
-    eventType === OsEventTypeList.FOREGROUND_EXIT_EVENT ||
-    eventType === OsEventTypeList.ABNORMAL_EXIT_EVENT ||
-    eventType === OsEventTypeList.SYSTEM_EXIT_EVENT
+function isExitEvent(
+  sysType: OsEventTypeList | null,
+  textType: OsEventTypeList | null
+): boolean {
+  return [sysType, textType].some(
+    (eventType) =>
+      eventType === OsEventTypeList.FOREGROUND_EXIT_EVENT ||
+      eventType === OsEventTypeList.ABNORMAL_EXIT_EVENT ||
+      eventType === OsEventTypeList.SYSTEM_EXIT_EVENT
   );
 }
 

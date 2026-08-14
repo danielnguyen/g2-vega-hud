@@ -1,12 +1,12 @@
 import {
+  CONNECTING_FOOTER,
   ERROR_FOOTER,
   HOME_FOOTER,
-  LOADING_FOOTER,
+  LISTENING_FOOTER,
   PAGES_FOOTER
 } from './constants';
 import type { RuntimeStatus } from './runtimeStatus';
 import type { AppState, GatewayRequestDebug, GlassesInputDebugEvent } from './types';
-import { MODES } from './types';
 
 export function render(root: HTMLElement, state: AppState): void {
   root.innerHTML = '';
@@ -21,8 +21,14 @@ function renderFrame(state: AppState): HTMLElement {
     case 'home':
       frame.appendChild(renderHome(state));
       break;
-    case 'loading':
-      frame.appendChild(renderLoading(state));
+    case 'connecting':
+      frame.appendChild(renderConnecting());
+      break;
+    case 'listening':
+      frame.appendChild(renderListening(state));
+      break;
+    case 'thinking':
+      frame.appendChild(renderThinking());
       break;
     case 'pages':
       frame.appendChild(renderPages(state));
@@ -41,36 +47,39 @@ function renderFrame(state: AppState): HTMLElement {
 function renderHome(state: AppState): HTMLElement {
   const section = document.createElement('section');
   section.className = 'screen';
-  section.appendChild(title(state.debug.appVersion));
+  section.appendChild(title('CCP Conversation'));
+  section.appendChild(text(state.homeMessage ?? 'Tap to talk'));
+  section.appendChild(renderConversationButton('Start talking', 'start'));
   section.appendChild(renderRuntimeStatus(state.runtimeStatus, false));
   section.appendChild(renderDebugPanel(state));
   section.appendChild(renderSettingsLink('Open Settings'));
-  section.appendChild(subtitle('Debug / Manual Controls'));
-
-  const list = document.createElement('div');
-  list.className = 'mode-list';
-
-  MODES.forEach((item, index) => {
-    const row = document.createElement('button');
-    row.className = index === state.selectedModeIndex ? 'mode selected' : 'mode';
-    row.textContent = `${index === state.selectedModeIndex ? '>' : ' '} ${item.label}`;
-    row.type = 'button';
-    row.dataset.modeIndex = String(index);
-    list.appendChild(row);
-  });
-
-  section.appendChild(list);
   section.appendChild(help(HOME_FOOTER));
   return section;
 }
 
-function renderLoading(state: AppState): HTMLElement {
-  const selected = MODES[state.selectedModeIndex];
+function renderConnecting(): HTMLElement {
   const section = document.createElement('section');
   section.className = 'screen center';
-  section.appendChild(title(selected?.label ?? 'VEGA'));
+  section.appendChild(title('CCP Conversation'));
+  section.appendChild(text('Connecting...'));
+  section.appendChild(help(CONNECTING_FOOTER));
+  return section;
+}
+
+function renderListening(state: AppState): HTMLElement {
+  const section = document.createElement('section');
+  section.className = 'screen center';
+  section.appendChild(title('Listening...'));
+  section.appendChild(text(state.liveTranscript || 'Speak now'));
+  section.appendChild(help(LISTENING_FOOTER));
+  return section;
+}
+
+function renderThinking(): HTMLElement {
+  const section = document.createElement('section');
+  section.className = 'screen center';
+  section.appendChild(title('CCP Conversation'));
   section.appendChild(text('Thinking...'));
-  section.appendChild(help(LOADING_FOOTER));
   return section;
 }
 
@@ -86,6 +95,8 @@ function renderPages(state: AppState): HTMLElement {
 
   section.appendChild(title(`${response.title} ${state.pageIndex + 1}/${response.pages.length}`));
   section.appendChild(text(response.pages[state.pageIndex] ?? ''));
+  section.appendChild(renderConversationButton('Ask a follow-up', 'start'));
+  section.appendChild(renderConversationButton('Back home', 'home'));
   section.appendChild(help(PAGES_FOOTER));
   return section;
 }
@@ -93,7 +104,7 @@ function renderPages(state: AppState): HTMLElement {
 function renderError(state: AppState): HTMLElement {
   const section = document.createElement('section');
   section.className = 'screen center';
-  section.appendChild(title('Gateway error'));
+  section.appendChild(title('Conversation error'));
   section.appendChild(text(state.errorMessage ?? 'Unknown error'));
   section.appendChild(help(ERROR_FOOTER));
   return section;
@@ -172,8 +183,8 @@ function renderRuntimeStatus(status: RuntimeStatus, detailed: boolean): HTMLElem
     section.appendChild(renderStatusRow('Last request', formatTimestamp(status.lastRequestAt)));
   }
 
-  if (status.lastMode) {
-    section.appendChild(renderStatusRow('Last mode', status.lastMode));
+  if (status.lastOperation) {
+    section.appendChild(renderStatusRow('Last operation', status.lastOperation));
   }
 
   if (detailed && status.lastStatus) {
@@ -224,7 +235,7 @@ function formatGatewayRequest(request: GatewayRequestDebug | null): string {
     return 'None';
   }
 
-  return `${request.label} / ${request.mode} / ${request.status} / ${formatTimestamp(request.updatedAt)}`;
+  return `${request.label} / ${request.operation} / ${request.status} / ${formatTimestamp(request.updatedAt)}`;
 }
 
 function redactAuthValue(value: string): string {
@@ -254,6 +265,18 @@ function renderSettingsLink(labelText = 'Settings'): HTMLElement {
   button.type = 'button';
   button.className = 'settings-link';
   button.dataset.settingsAction = 'open';
+  button.textContent = labelText;
+  return button;
+}
+
+function renderConversationButton(
+  labelText: string,
+  action: 'start' | 'home'
+): HTMLElement {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'action-button conversation-action';
+  button.dataset.conversationAction = action;
   button.textContent = labelText;
   return button;
 }

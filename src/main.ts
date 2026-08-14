@@ -1,7 +1,11 @@
 import { configFromSettings, loadConfig, loadEnvConfig, type AppConfig } from './config';
 import { createEvenDisplay, type EvenDisplay } from './even/evenDisplay';
-import { bindEvenInput, type NormalizedEvenInputEvent } from './even/evenInput';
-import { sendTurn } from './gatewayClient';
+import {
+  bindEvenInput,
+  type EvenInputBinding,
+  type NormalizedEvenInputEvent
+} from './even/evenInput';
+import { checkGateway, createSttSession, sendTurn } from './gatewayClient';
 import { bindKeyboardInput, type InputEventName } from './input';
 import { render } from './renderer';
 import {
@@ -13,24 +17,30 @@ import {
   markRequestSuccess
 } from './runtimeStatus';
 import { clearSettings, saveSettings, type RuntimeSettings } from './settings';
+import { createSpeechToTextProvider, type SpeechToTextSession } from './speechToText';
 import {
   applyConfig,
   backHome,
   initialState,
   movePage,
-  moveSelection,
   openSettings,
+  showConnecting,
   showError,
-  showLoading,
-  showPages
+  showListening,
+  showPages,
+  showThinking
 } from './state';
-import { MODES, type AppState, type DebugState, type Mode } from './types';
+import type { AppState, DebugState, GatewayPageResponse } from './types';
 import { APP_VERSION } from './version';
 import './style.css';
 
-const CONNECTION_TEST_PROMPT = 'Give me a one sentence system status check for the VEGA / LLM Memory stack.';
-const GLASSES_HELLO_PROMPT = 'Say hello from VEGA HUD';
 const EMPTY_RESPONSE_MESSAGE = 'Gateway returned no renderable pages.';
+
+type ActiveCapture = {
+  session: SpeechToTextSession | null;
+  microphoneEnabled: boolean;
+  settled: boolean;
+};
 
 const root = document.querySelector<HTMLDivElement>('#app');
 
@@ -40,14 +50,23 @@ if (!root) {
 
 const appRoot: HTMLDivElement = root;
 
-let state: AppState = initialState(false, emptySettings(), initialRuntimeStatus(false), buildDebugState(emptySettings()));
+let state: AppState = initialState(
+  false,
+  emptySettings(),
+  initialRuntimeStatus(false),
+  buildDebugState(emptySettings())
+);
 let evenDisplay: EvenDisplay | null = null;
+let evenInput: EvenInputBinding | null = null;
 let config: AppConfig | null = null;
+let activeCapture: ActiveCapture | null = null;
+let activeConversationId: string | null = null;
+let ccpTurnPending = false;
 
 function commit(nextState: AppState): void {
   state = nextState;
   render(appRoot, state);
-  bindModeClicks();
+  bindConversationControls();
   bindSettingsControls();
 
   if (evenDisplay) {
@@ -55,31 +74,16 @@ function commit(nextState: AppState): void {
   }
 }
 
-async function runSelectedMode(): Promise<void> {
-  const selected = MODES[state.selectedModeIndex];
-  if (!selected) {
-    commit(withDebugError(showError(state, 'No mode selected'), 'No mode selected'));
-    return;
-  }
-
-  await runGatewayTurn(selected.label, selected.mode, selected.prompt);
-}
-
-function bindModeClicks(): void {
-  appRoot.querySelectorAll<HTMLElement>('[data-mode-index]').forEach((element) => {
+function bindConversationControls(): void {
+  appRoot.querySelectorAll<HTMLElement>('[data-conversation-action]').forEach((element) => {
     element.addEventListener('click', () => {
-      const modeIndex = Number(element.dataset.modeIndex);
-
-      if (!Number.isInteger(modeIndex) || modeIndex < 0 || modeIndex >= MODES.length) {
-        return;
+      const action = element.dataset.conversationAction;
+      if (action === 'start') {
+        void startListening();
       }
-
-      state = {
-        ...state,
-        selectedModeIndex: modeIndex
-      };
-
-      void runSelectedMode();
+      if (action === 'home') {
+        commit(backHome(state));
+      }
     });
   });
 }
@@ -121,22 +125,24 @@ function bindSettingsControls(): void {
 
 function handleInput(eventName: InputEventName): void {
   if (state.screen === 'home') {
-    if (eventName === 'up') commit(moveSelection(state, -1));
-    if (eventName === 'down') commit(moveSelection(state, 1));
-    if (eventName === 'press') void runSelectedMode();
-    if (eventName === 'doublePress') void runHelloFromGlasses();
+    if (eventName === 'press') {
+      void startListening();
+    }
+    return;
+  }
+
+  if (state.screen === 'connecting' || state.screen === 'listening') {
+    if (eventName === 'doublePress') {
+      void cancelActiveCapture();
+    }
     return;
   }
 
   if (state.screen === 'pages') {
     if (eventName === 'up') commit(movePage(state, -1));
     if (eventName === 'down') commit(movePage(state, 1));
-    if (eventName === 'press' || eventName === 'doublePress') commit(backHome(state));
-    return;
-  }
-
-  if (state.screen === 'loading' && eventName === 'doublePress') {
-    commit(backHome(state));
+    if (eventName === 'press') void startListening();
+    if (eventName === 'doublePress') commit(backHome(state));
     return;
   }
 
@@ -162,11 +168,286 @@ function handleEvenInput(event: NormalizedEvenInputEvent): void {
   }
 }
 
+async function initializeEvenInput(): Promise<void> {
+  evenInput = await bindEvenInput({
+    onInput: handleEvenInput,
+    onPcm: (chunk) => {
+      activeCapture?.session?.sendPcm(chunk);
+    },
+    onExit: cleanupForExit
+  });
+}
+
 async function initializeEvenDisplay(): Promise<void> {
   evenDisplay = await createEvenDisplay();
 
   if (evenDisplay) {
     await evenDisplay.render(state);
+  }
+}
+
+async function startListening(): Promise<void> {
+  if (activeCapture || ccpTurnPending) {
+    return;
+  }
+
+  if (!config) {
+    commit({
+      ...openSettings(state, state.settingsDraft, 'Settings required before use.'),
+      runtimeStatus: markConfigured(state.runtimeStatus, false),
+      debug: {
+        ...state.debug,
+        lastError: 'Settings required before use.'
+      }
+    });
+    return;
+  }
+
+  if (!evenInput) {
+    commit(withDebugError(showError(state, 'G2 microphone unavailable.'), 'G2 microphone unavailable.'));
+    return;
+  }
+
+  const capture: ActiveCapture = {
+    session: null,
+    microphoneEnabled: false,
+    settled: false
+  };
+  activeCapture = capture;
+  commit(showConnecting(state));
+  let failureStage: 'bootstrap' | 'provider' = 'bootstrap';
+
+  try {
+    const bootstrap = await createSttSession(config);
+    if (activeCapture !== capture) {
+      return;
+    }
+
+    failureStage = 'provider';
+    const provider = createSpeechToTextProvider(bootstrap.provider);
+    if (!provider) {
+      throw new Error('unsupported_speech_provider');
+    }
+
+    const session = await provider.start(bootstrap.token, {
+      onTranscriptUpdate: (transcript) => {
+        if (activeCapture === capture && !capture.settled) {
+          commit(showListening(state, transcript));
+        }
+      },
+      onUtteranceComplete: (transcript) => {
+        void completeUtterance(capture, transcript);
+      },
+      onError: () => {
+        void failActiveCapture(capture);
+      }
+    });
+
+    if (activeCapture !== capture) {
+      session.cancel();
+      return;
+    }
+
+    capture.session = session;
+    capture.microphoneEnabled = true;
+    await evenInput.setMicrophoneEnabled(true);
+
+    if (activeCapture !== capture) {
+      await terminateCapture(capture, 'cancel');
+      return;
+    }
+
+    commit(showListening(state));
+  } catch (error) {
+    if (activeCapture !== capture) {
+      return;
+    }
+
+    activeCapture = null;
+    capture.settled = true;
+    await terminateCapture(capture, 'cancel');
+    commit(
+      withDebugError(
+        showError(state, 'Speech service unavailable.'),
+        failureStage === 'bootstrap'
+          ? sttBootstrapDebugMessage(error)
+          : 'STT provider connection failed.'
+      )
+    );
+  }
+}
+
+async function completeUtterance(capture: ActiveCapture, transcript: string): Promise<void> {
+  if (activeCapture !== capture || capture.settled) {
+    return;
+  }
+
+  capture.settled = true;
+  activeCapture = null;
+  await terminateCapture(capture, 'finish');
+
+  const finalTranscript = transcript.trim();
+  if (!finalTranscript) {
+    commit(backHome(state, 'Nothing heard'));
+    return;
+  }
+
+  await runConversationTurn(finalTranscript);
+}
+
+async function failActiveCapture(capture: ActiveCapture): Promise<void> {
+  if (activeCapture !== capture || capture.settled) {
+    return;
+  }
+
+  capture.settled = true;
+  activeCapture = null;
+  await terminateCapture(capture, 'cancel');
+  commit(
+    withDebugError(
+      showError(state, 'Speech service unavailable.'),
+      'STT provider stream failed.'
+    )
+  );
+}
+
+async function cancelActiveCapture(): Promise<void> {
+  const capture = activeCapture;
+  if (!capture) {
+    return;
+  }
+
+  activeCapture = null;
+  capture.settled = true;
+  await terminateCapture(capture, 'cancel');
+  commit(backHome(state));
+}
+
+async function terminateCapture(
+  capture: ActiveCapture,
+  disposition: 'finish' | 'cancel'
+): Promise<void> {
+  if (capture.microphoneEnabled) {
+    capture.microphoneEnabled = false;
+    try {
+      await evenInput?.setMicrophoneEnabled(false);
+    } catch {
+      // Cleanup continues even if the bridge is already exiting.
+    }
+  }
+
+  const session = capture.session;
+  capture.session = null;
+  if (!session) {
+    return;
+  }
+
+  try {
+    if (disposition === 'finish') {
+      session.finish();
+    } else {
+      session.cancel();
+    }
+  } catch {
+    // Provider cleanup is best effort after microphone shutdown.
+  }
+}
+
+async function runConversationTurn(transcript: string): Promise<void> {
+  if (ccpTurnPending || !config) {
+    return;
+  }
+
+  ccpTurnPending = true;
+  const conversationId = activeConversationId;
+  commit({
+    ...showThinking(state),
+    runtimeStatus: markRequestStart(state.runtimeStatus),
+    debug: {
+      ...state.debug,
+      lastGatewayRequest: {
+        label: 'voice-turn',
+        operation: 'conversation',
+        status: 'pending',
+        updatedAt: new Date().toISOString()
+      },
+      lastError: null
+    }
+  });
+
+  try {
+    const response = await sendTurn(config, transcript, {
+      inputMode: 'voice_transcribed',
+      ...(conversationId ? { conversationId } : {})
+    });
+
+    updateConversationReference(response);
+
+    if (!hasRenderablePages(response.pages)) {
+      throw new Error(EMPTY_RESPONSE_MESSAGE);
+    }
+
+    commit({
+      ...showPages(state, response),
+      runtimeStatus: markRequestSuccess(state.runtimeStatus, response.status ?? 'ok'),
+      debug: {
+        ...state.debug,
+        lastGatewayRequest: {
+          label: 'voice-turn',
+          operation: 'conversation',
+          status: response.status ?? 'ok',
+          updatedAt: new Date().toISOString()
+        },
+        lastError: null
+      }
+    });
+  } catch (error) {
+    const message = toUserErrorMessage(error);
+    commit({
+      ...showError(state, message),
+      runtimeStatus: markRequestFailure(state.runtimeStatus, message),
+      debug: {
+        ...state.debug,
+        lastGatewayRequest: {
+          label: 'voice-turn',
+          operation: 'conversation',
+          status: 'failed',
+          updatedAt: new Date().toISOString()
+        },
+        lastError: message
+      }
+    });
+  } finally {
+    ccpTurnPending = false;
+  }
+}
+
+function updateConversationReference(response: GatewayPageResponse): void {
+  if (response.conversation_disposition === 'non_current') {
+    activeConversationId = null;
+  } else if (response.conversation_id) {
+    activeConversationId = response.conversation_id;
+  }
+}
+
+function cleanupForExit(): void {
+  const capture = activeCapture;
+  activeCapture = null;
+
+  if (capture) {
+    capture.settled = true;
+    if (capture.microphoneEnabled) {
+      capture.microphoneEnabled = false;
+      void evenInput?.setMicrophoneEnabled(false).catch(() => undefined);
+    }
+
+    const session = capture.session;
+    capture.session = null;
+    try {
+      session?.cancel();
+    } catch {
+      // The surface is exiting; cleanup remains best effort.
+    }
   }
 }
 
@@ -194,6 +475,31 @@ function toUserErrorMessage(error: unknown): string {
   return 'Gateway request failed.';
 }
 
+function sttBootstrapDebugMessage(error: unknown): string {
+  if (!(error instanceof Error)) {
+    return 'STT bootstrap failed.';
+  }
+
+  const httpStatus = /^Gateway returned HTTP (\d+)$/.exec(error.message)?.[1];
+  if (httpStatus) {
+    return `STT bootstrap failed (HTTP ${httpStatus}).`;
+  }
+
+  if (error.message === 'Gateway timed out') {
+    return 'STT bootstrap timed out.';
+  }
+
+  if (error.message === 'Could not reach gateway') {
+    return 'STT bootstrap could not reach gateway.';
+  }
+
+  if (error.message === 'Invalid STT session response') {
+    return 'STT bootstrap returned an invalid response.';
+  }
+
+  return 'STT bootstrap failed.';
+}
+
 async function bootstrap(): Promise<void> {
   config = await loadConfig();
   const envFallback = loadEnvConfig();
@@ -202,7 +508,14 @@ async function bootstrap(): Promise<void> {
     : emptySettings(envFallback ?? undefined);
   const configured = Boolean(config);
 
-  commit(initialState(configured, settingsDraft, initialRuntimeStatus(configured), buildDebugState(settingsDraft)));
+  commit(
+    initialState(
+      configured,
+      settingsDraft,
+      initialRuntimeStatus(configured),
+      buildDebugState(settingsDraft)
+    )
+  );
 }
 
 async function handleSaveSettings(): Promise<void> {
@@ -237,7 +550,10 @@ async function handleClearSettings(): Promise<void> {
   config = fallbackConfig;
 
   if (fallbackConfig) {
-    const fallbackSettings = { gatewayUrl: fallbackConfig.gatewayUrl, authValue: fallbackConfig.authValue };
+    const fallbackSettings = {
+      gatewayUrl: fallbackConfig.gatewayUrl,
+      authValue: fallbackConfig.authValue
+    };
     commit(
       withCurrentSettings(
         applyConfig(
@@ -283,7 +599,7 @@ async function handleTestConnection(): Promise<void> {
       ...state.debug,
       lastGatewayRequest: {
         label: 'connection-test',
-        mode: 'status',
+        operation: 'status-check',
         status: 'pending',
         updatedAt: new Date().toISOString()
       },
@@ -292,16 +608,16 @@ async function handleTestConnection(): Promise<void> {
   });
 
   try {
-    const response = await sendTurn(nextConfig, 'status', CONNECTION_TEST_PROMPT);
+    await checkGateway(nextConfig);
     commit({
       ...openSettings(state, draft, 'Connection ok.'),
-      runtimeStatus: markConnectionCheck(state.runtimeStatus, 'success', response.status ?? 'ok'),
+      runtimeStatus: markConnectionCheck(state.runtimeStatus, 'success', 'ok'),
       debug: {
         ...state.debug,
         lastGatewayRequest: {
           label: 'connection-test',
-          mode: 'status',
-          status: response.status ?? 'ok',
+          operation: 'status-check',
+          status: 'ok',
           updatedAt: new Date().toISOString()
         },
         lastError: null
@@ -316,84 +632,7 @@ async function handleTestConnection(): Promise<void> {
         ...state.debug,
         lastGatewayRequest: {
           label: 'connection-test',
-          mode: 'status',
-          status: 'failed',
-          updatedAt: new Date().toISOString()
-        },
-        lastError: message
-      }
-    });
-  }
-}
-
-async function runHelloFromGlasses(): Promise<void> {
-  await runGatewayTurn('glasses-hello', 'ask', GLASSES_HELLO_PROMPT);
-}
-
-async function runGatewayTurn(label: string, mode: Mode, text: string): Promise<void> {
-  if (shouldSuppressGatewayTurn()) {
-    return;
-  }
-
-  if (!config) {
-    commit({
-      ...openSettings(state, state.settingsDraft, 'Settings required before use.'),
-      runtimeStatus: markConfigured(state.runtimeStatus, false),
-      debug: {
-        ...state.debug,
-        lastError: 'Settings required before use.'
-      }
-    });
-    return;
-  }
-
-  commit({
-    ...showLoading(state),
-    runtimeStatus: markRequestStart(state.runtimeStatus, mode),
-    debug: {
-      ...state.debug,
-      lastGatewayRequest: {
-        label,
-        mode,
-        status: 'pending',
-        updatedAt: new Date().toISOString()
-      },
-      lastError: null
-    }
-  });
-
-  try {
-    const response = await sendTurn(config, mode, text);
-
-    if (!hasRenderablePages(response.pages)) {
-      throw new Error(EMPTY_RESPONSE_MESSAGE);
-    }
-
-    commit({
-      ...showPages(state, response),
-      runtimeStatus: markRequestSuccess(state.runtimeStatus, mode, response.status ?? 'ok'),
-      debug: {
-        ...state.debug,
-        lastGatewayRequest: {
-          label,
-          mode,
-          status: response.status ?? 'ok',
-          updatedAt: new Date().toISOString()
-        },
-        lastError: null
-      }
-    });
-  } catch (error) {
-    console.warn('[gateway]', error);
-    const message = toUserErrorMessage(error);
-    commit({
-      ...showError(state, message),
-      runtimeStatus: markRequestFailure(state.runtimeStatus, mode, message),
-      debug: {
-        ...state.debug,
-        lastGatewayRequest: {
-          label,
-          mode,
+          operation: 'status-check',
           status: 'failed',
           updatedAt: new Date().toISOString()
         },
@@ -415,8 +654,14 @@ function readSettingsForm(): RuntimeSettings {
 
   const gatewayUrlInput = form.elements.namedItem('gatewayUrl');
   const authValueInput = form.elements.namedItem('authValue');
-  const gatewayUrl = gatewayUrlInput instanceof HTMLInputElement ? gatewayUrlInput.value : state.settingsDraft.gatewayUrl;
-  const authValue = authValueInput instanceof HTMLInputElement ? authValueInput.value : state.settingsDraft.authValue;
+  const gatewayUrl =
+    gatewayUrlInput instanceof HTMLInputElement
+      ? gatewayUrlInput.value
+      : state.settingsDraft.gatewayUrl;
+  const authValue =
+    authValueInput instanceof HTMLInputElement
+      ? authValueInput.value
+      : state.settingsDraft.authValue;
 
   return { gatewayUrl, authValue };
 }
@@ -436,14 +681,6 @@ function buildDebugState(currentSettings: RuntimeSettings): DebugState {
     lastGatewayRequest: null,
     lastError: null
   };
-}
-
-function isGatewayRequestPending(): boolean {
-  return state.debug.lastGatewayRequest?.status === 'pending';
-}
-
-function shouldSuppressGatewayTurn(): boolean {
-  return isGatewayRequestPending();
 }
 
 function hasRenderablePages(pages: string[]): boolean {
@@ -471,11 +708,11 @@ function withDebugError(nextState: AppState, message: string): AppState {
 }
 
 bindKeyboardInput(handleInput);
-bindEvenInput(handleEvenInput).catch(() => undefined);
-initializeEvenDisplay().catch(() => undefined);
+void initializeEvenInput();
+void initializeEvenDisplay();
+window.addEventListener('beforeunload', cleanupForExit);
 commit(state);
-bootstrap().catch((error) => {
-  console.warn('[config]', error);
+bootstrap().catch(() => {
   commit({
     ...openSettings(state, emptySettings(), 'Could not load settings.'),
     runtimeStatus: markConfigured(state.runtimeStatus, false),

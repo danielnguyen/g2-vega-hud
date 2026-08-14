@@ -1,29 +1,28 @@
 # g2-vega-hud
 
-VEGA HUD v0.3 is an Even Realities G2 heads-up client for VEGA.
+VEGA HUD v0.3 is an Even Realities G2 heads-up client for CCP conversations.
 
-This app keeps the glasses as the primary HUD surface while the phone app becomes the configuration and runtime status surface. It sends short mode-based requests to `g2-gateway`, then renders the returned `pages[]` response.
+This app keeps the glasses as the primary HUD surface while the phone app remains the configuration and runtime status surface. A tap starts a spoken turn, Deepgram Flux transcribes the G2 microphone stream, and the final transcript is sent through `g2-gateway` to Chat Orchestrator. Returned `conversation_id` values are reused in memory for spoken follow-ups.
 
 ## Architecture
 
 ```text
 Even G2 / Even app WebView
 → g2-vega-hud
-→ g2-gateway
-→ chat-orchestrator
-→ LLM Memory stack
+  ├→ g2-gateway /g2/stt/session → short-lived token
+  ├→ Deepgram Flux → final transcript
+  └→ g2-gateway /g2/turn → chat-orchestrator → LLM Memory stack
 ```
 
-## Modes
+## Conversation controls
 
 ```text
-Brief
-Ask
-Recall
-Status
+Home: tap to talk
+Listening: double tap to cancel
+Response: scroll pages, tap for a follow-up, double tap for home
 ```
 
-Mode buttons remain available on the phone for debug and manual control, but the primary HUD remains on the glasses.
+The microphone starts only after the STT WebSocket is ready and stops on completion, cancellation, provider failure, or surface exit. Conversation identity remains server-owned; the app keeps only the current returned ID in memory for its process lifetime.
 
 ## Local setup
 
@@ -53,10 +52,10 @@ Do not commit `.env`.
 ## Browser controls for local dev
 
 ```text
-ArrowUp      previous selection / previous page
-ArrowDown    next selection / next page
-Enter        select / home
-Escape       back / home
+ArrowUp      previous response page
+ArrowDown    next response page
+Enter        talk / follow-up
+Escape       cancel / home
 ```
 
 ## Even Hub testing
@@ -85,7 +84,7 @@ Even Hub can cache uploaded packages by the `app.json` version. Uploading a new 
 cp app.json.example app.json
 ```
 
-Edit the local `app.json` values before packing, especially the network whitelist for your gateway host.
+Edit the local `app.json` values before packing, especially the network whitelist for your gateway host. Keep the checked-in Deepgram WebSocket host and `g2-microphone` permission.
 
 Use `npm run pack` for Even Hub uploads. It automatically:
 
@@ -108,20 +107,18 @@ The checked-in template is `app.json.example`. Update the local `app.json` copy 
 
 ## Device validation checklist
 
-Use the existing debug panel during device testing to record the actual Even SDK event summaries you observe.
+Use the existing debug panel during device testing to record the actual Even SDK event summaries you observe. A live Deepgram key must be configured only on `g2-gateway`; the client receives a short-lived token from `/g2/stt/session`.
 
 1. Confirm the packaged app shows the synced version on phone and glasses surfaces.
-2. Confirm home-screen scroll up/down changes the selected mode on the glasses.
-3. Confirm a single press on the glasses runs the selected mode through the gateway.
-4. Confirm the gateway response renders on the glasses.
-5. Confirm response-page scroll up/down moves between pages.
-6. Confirm `press` and `doublePress` return home from response pages.
-7. Confirm `doublePress` returns home from the loading screen.
-8. Confirm `press` and `doublePress` return home from the error screen.
-9. Confirm repeated or noisy input does not create duplicate gateway requests.
-10. Confirm the home-screen diagnostic `doublePress` hello action works cleanly, or document and disable it only if device validation shows interference.
-11. Record the actual emitted lifecycle events shown in the debug panel during app foreground and exit transitions.
-12. Confirm phone manual controls and the settings screen still work, including preserving unsaved edits during passive Even input updates.
+2. Tap to talk and confirm `Listening...` appears only after STT connects.
+3. Speak a question and confirm the live transcript is recognizable.
+4. Confirm Flux EndOfTurn stops the microphone and sends exactly one CCP turn.
+5. Confirm the CCP answer renders and response-page scroll works.
+6. Tap from the response and ask a follow-up that reuses the current conversation.
+7. Double tap during listening and confirm cancellation sends nothing to CCP.
+8. Exercise STT and gateway failures and confirm the microphone is off afterward.
+9. Confirm exit/lifecycle events stop microphone capture.
+10. Confirm phone settings and connection testing still work.
 
 ## Runtime settings for packaged installs
 
@@ -144,4 +141,4 @@ Do not put Cloudflare Access service tokens, backend API keys, chat-orchestrator
 
 ## Security
 
-This is a client-side app. Anything placed in `VITE_*` variables is visible to the app. Do not put Cloudflare Access service tokens, Cloudflare Access service-token secrets, backend API keys, chat-orchestrator API keys, basic-memory-store keys, or other privileged secrets here.
+This is a client-side app. Anything placed in `VITE_*` variables is visible to the app. Do not put a permanent Deepgram API key, Cloudflare Access service tokens, Cloudflare Access service-token secrets, backend API keys, chat-orchestrator API keys, basic-memory-store keys, or other privileged secrets here. The only Deepgram credential used by this app is the short-lived access token returned by `g2-gateway`.
