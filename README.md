@@ -80,6 +80,8 @@ Scan the QR code from the Even Realities app. Prototype and QR-driven developmen
 
 Even Hub can cache uploaded packages by the `app.json` version. Uploading a new `.ehpk` with the same manifest version can cause Even Hub to serve an older bundle.
 
+`package.json` is the checked-in development/local version source of truth. `app.json.example` is a version-neutral template and intentionally uses `0.0.0`; neither local nor CI packaging treats that template version as authoritative.
+
 `app.json` is intentionally local and untracked. Before local packaging:
 
 ```bash
@@ -91,9 +93,23 @@ Edit the local `app.json` values before packing, especially the network whitelis
 Use `npm run pack` for local/manual Even Hub uploads. It automatically:
 
 1. Fails fast if `app.json` is missing and tells you to copy `app.json.example`.
-2. Increments the patch version in the local package/lock/manifest files.
-3. Keeps the visible app version generated from the synchronized package and manifest version.
-4. Builds with packaged env isolation and creates `vega-hud.ehpk`.
+2. Copies the current `package.json` version into the local `app.json`.
+3. Builds with packaged env isolation.
+4. Creates `vega-hud.ehpk`.
+
+It does **not** bump or rewrite tracked version files. If you intentionally need a new local development version, update the package version first, for example:
+
+```bash
+npm version patch --no-git-tag-version
+```
+
+or:
+
+```bash
+npm version 0.3.3 --no-git-tag-version
+```
+
+`npm version` updates both `package.json` and `package-lock.json`; the subsequent `npm run pack` syncs that version into the untracked `app.json`.
 
 If `app.json` is missing, packaging stops with:
 
@@ -103,12 +119,12 @@ app.json is missing. Copy app.json.example to app.json and edit local values bef
 
 ### Version source of truth
 
-There are two intentionally different flows:
+There are two simple flows:
 
-- **Tagged CI release:** the Git tag is the release-version source of truth. A tag such as `v0.3.3` causes CI to generate package metadata at `0.3.3` inside the runner. You do **not** need to manually edit `package.json`, `package-lock.json`, and `app.json.example` before creating the tag.
-- **Local/manual pack:** the checked-out package/manifest files are the starting point, and `npm run pack` bumps/synchronizes the local copies before packaging.
+- **Tagged CI release:** the Git tag is the release-version source of truth. A tag such as `v0.3.3` causes CI to generate package/lock/manifest metadata at `0.3.3` inside the runner. You do **not** need to manually edit `package.json`, `package-lock.json`, or `app.json.example` before creating the tag.
+- **Local/manual pack:** `package.json` is the version source of truth. `npm run pack` copies that version into the untracked `app.json` without modifying tracked files.
 
-The tagged workflow does not commit its generated version changes back to `main`, so checked-in development versions may lag the newest release tag. That is expected and should not be treated as the release version authority.
+The tagged workflow does not commit its generated version changes back to `main`, so the checked-in development version may lag the newest release tag. That is expected; release tags remain the authority for released versions.
 
 ## Automated packaged releases
 
@@ -131,7 +147,7 @@ The CI build intentionally injects fake `VITE_GATEWAY_URL` and `VITE_AUTH_VALUE`
 
 ## Manifest
 
-The checked-in template is `app.json.example`. Update the local `app.json` copy before device testing so the network whitelist matches your gateway host and any other machine-specific values are correct.
+The checked-in template is `app.json.example`. Its `version` is deliberately a non-authoritative placeholder. Local packaging syncs the version from `package.json`; tagged CI packaging uses the tag version. Update the local `app.json` copy before device testing so the network whitelist matches your gateway host and any other machine-specific values are correct.
 
 ## Device validation checklist
 
