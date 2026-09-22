@@ -5,7 +5,7 @@ import {
   type EvenInputBinding,
   type NormalizedEvenInputEvent
 } from './even/evenInput';
-import { checkGateway, createSttSession, sendTurn } from './gatewayClient';
+import { checkGateway, createSttSession, pollWork, sendTurn } from './gatewayClient';
 import { bindKeyboardInput, type InputEventName } from './input';
 import { render } from './renderer';
 import {
@@ -376,10 +376,27 @@ async function runConversationTurn(transcript: string): Promise<void> {
   });
 
   try {
-    const response = await sendTurn(config, transcript, {
+    const submission = await sendTurn(config, transcript, {
       inputMode: 'voice_transcribed',
       ...(conversationId ? { conversationId } : {})
     });
+
+    let response: GatewayPageResponse;
+    if ('delivery_status' in submission) {
+      activeConversationId = submission.conversation_id;
+      const work = await pollWork(config, submission);
+      if (work.state === 'failed') throw new Error('Request could not be completed.');
+      response = {
+        request_id: work.request_id,
+        conversation_id: work.conversation_id,
+        title: submission.title,
+        pages: work.pages,
+        source: work.source,
+        raw_length: work.raw_length
+      };
+    } else {
+      response = submission;
+    }
 
     updateConversationReference(response);
 

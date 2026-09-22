@@ -5,6 +5,7 @@
   "type": "module",
   "private": false,
   "scripts": {
+    "test": "vitest run",
     "dev": "vite --host 0.0.0.0",
     "build": "tsc && vite build",
     "build:packaged": "VITE_DISABLE_ENV_CONFIG=1 tsc && VITE_DISABLE_ENV_CONFIG=1 vite build",
@@ -25,6 +26,7 @@
     "@evenrealities/evenhub-cli": "^0.1.12",
     "@evenrealities/evenhub-simulator": "^0.7.2",
     "typescript": "^5.8.2",
-    "vite": "^6.2.0"
+    "vite": "^6.2.0",
+    "vitest": "^3.0.8"
   }
 }

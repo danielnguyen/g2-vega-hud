@@ -28,6 +28,28 @@ export type SttSessionBootstrap = {
   expires_in: number;
 };
 
+export type GatewayDeferredResponse = {
+  request_id: string;
+  conversation_id: string;
+  work_id: string;
+  delivery_status: 'pending';
+  title: string;
+  source: 'chat-orchestrator';
+};
+
+export type GatewayTurnResponse = GatewayPageResponse | GatewayDeferredResponse;
+
+export type GatewayWorkResponse = {
+  work_id: string;
+  conversation_id: string;
+  request_id: string;
+  source: 'chat-orchestrator';
+} & (
+  | { state: 'pending' | 'running' }
+  | { state: 'failed'; failure_code: 'interrupted' | 'execution_failed' | 'dependency_unavailable' | 'authority_unavailable' }
+  | { state: 'completed'; pages: string[]; raw_length: number }
+);
+
 export type GatewayRequestDebug = {
   label: string;
   operation: 'conversation' | 'status-check';
