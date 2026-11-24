@@ -202,3 +202,47 @@ describe('gateway turn and exact work transport', () => {
     assertGets(mock, 71);
   });
 });
+
+describe('local cancellation without server cancellation or resubmission', () => {
+  it('cancels the polling delay without making a request or leaking a timer', async () => {
+    vi.useFakeTimers();
+    const mock = vi.fn<typeof fetch>(); vi.stubGlobal('fetch', mock);
+    const controller = new AbortController();
+    const result = pollWork(config, deferred, 1000, controller.signal);
+    const rejected = expect(result).rejects.toMatchObject({ name: 'AbortError' });
+    controller.abort(); await rejected;
+    expect(mock).not.toHaveBeenCalled(); expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it.each(['turn', 'work'] as const)('aborts an in-flight %s fetch and clears its deadline', async kind => {
+    vi.useFakeTimers();
+    const mock = vi.fn<typeof fetch>((_url, init) => new Promise((_resolve, reject) => {
+      init?.signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')));
+    })); vi.stubGlobal('fetch', mock);
+    const controller = new AbortController();
+    const result = kind === 'turn' ? sendTurn(config, 'hello', { signal: controller.signal }) :
+      pollWork(config, deferred, 1000, controller.signal);
+    const rejected = expect(result).rejects.toMatchObject({ name: 'AbortError' });
+    if (kind === 'work') await vi.advanceTimersByTimeAsync(1000);
+    controller.abort(); await rejected;
+    expect(mock).toHaveBeenCalledTimes(1);
+    expect(mock.mock.calls[0][1]?.signal?.aborted).toBe(true);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('does not accept a late response after cancellation even if fetch ignores abort', async () => {
+    let resolve!: (value: Response) => void;
+    vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(yes => { resolve = yes; })));
+    const controller = new AbortController();
+    const result = sendTurn(config, 'hello', { signal: controller.signal });
+    controller.abort(); resolve(json(synchronous));
+    await expect(result).rejects.toMatchObject({ name: 'AbortError' });
+  });
+
+  it('never starts a request with an already cancelled signal', async () => {
+    const mock = vi.fn(); vi.stubGlobal('fetch', mock);
+    const controller = new AbortController(); controller.abort();
+    await expect(sendTurn(config, 'hello', { signal: controller.signal })).rejects.toMatchObject({ name: 'AbortError' });
+    expect(mock).not.toHaveBeenCalled();
+  });
+});

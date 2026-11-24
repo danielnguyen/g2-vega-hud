@@ -2,7 +2,7 @@
 
 VEGA HUD v0.3 is an Even Realities G2 heads-up client for CCP conversations.
 
-This app keeps the glasses as the primary HUD surface while the phone app remains the configuration and runtime status surface. A tap starts a spoken turn, Deepgram Flux transcribes the G2 microphone stream, and the final transcript is sent through `g2-gateway` to Chat Orchestrator. Returned `conversation_id` values are reused in memory for spoken follow-ups.
+This app keeps the glasses as the primary HUD surface while the phone app remains the configuration and runtime status surface. A deliberate tap starts a hands-free conversation session, Deepgram Flux transcribes the G2 microphone stream, and the final transcript is sent through `g2-gateway` to Chat Orchestrator. After a successful answer, a fresh STT session listens for the next question. Returned `conversation_id` values are reused in memory for spoken follow-ups.
 
 The current implementation direction is summarized in [`plan/README.md`](plan/README.md).
 
@@ -19,12 +19,17 @@ Even G2 / Even app WebView
 ## Conversation controls
 
 ```text
-Home: tap to talk
-Listening: double tap to cancel
-Response: scroll pages, tap for a follow-up, double tap for home
+Home: tap to start
+Connecting / listening / thinking: double tap to stop
+Answer remains visible: scroll pages while connecting or listening
+Stopped / idle: tap to resume; double tap from answer to go home
 ```
 
-The microphone starts only after the STT WebSocket is ready and stops on completion, cancellation, provider failure, or surface exit. Conversation identity remains server-owned; the app keeps only the current returned ID in memory for its process lifetime.
+The microphone starts only after the glasses startup page and a fresh STT WebSocket are ready, and `Listening...` appears only after microphone enable is acknowledged. Each utterance stops capture and confirms microphone shutdown before sending to CCP. The previous answer and page position remain visible during rearm; live transcript text appears in the glasses footer when an answer is displayed. A new answer starts at page one.
+
+Initial silence stops the session after 30 seconds; capture has a 60-second absolute limit even while speaking. Empty speech, errors, double tap, surface exit, network loss or a device disconnect also stop it. Use the phone Stop button or double tap on glasses, including while waiting for CCP. Stopping a request or deferred polling only cancels local waiting; it does not cancel server work or resubmit it. Valid deferred work has no overall polling deadline.
+
+If microphone shutdown cannot be confirmed, the app makes one bounded cleanup retry and blocks further capture for that app instance. Exit and reopen before trying again; verify the mic is off on the device. Exit/disconnect also requires reopening the app. There is no ambient listening, wake word or voice output. Conversation identity remains server-owned; the app keeps only the current returned ID in memory for its process lifetime.
 
 ## Local setup
 
@@ -158,11 +163,16 @@ Use the existing debug panel during device testing to record the actual Even SDK
 3. Speak a question and confirm the live transcript is recognizable.
 4. Confirm Flux EndOfTurn stops the microphone and sends exactly one CCP turn.
 5. Confirm the CCP answer renders and response-page scroll works.
-6. Tap from the response and ask a follow-up that reuses the current conversation.
+6. Without tapping, ask at least three sequential follow-ups and verify continuity, fresh listening status, and repeated microphone on/off transitions. Scroll a multi-page answer during rearm and listening; verify its page position remains stable until the next answer.
 7. Double tap during listening and confirm cancellation sends nothing to CCP.
 8. Exercise STT and gateway failures and confirm the microphone is off afterward.
 9. Confirm exit/lifecycle events stop microphone capture.
-10. Confirm phone settings and connection testing still work.
+10. Wait silently for 30 seconds, then resume by tapping. Speak beyond 60 seconds to verify the absolute limit stops capture without submitting a partial turn.
+11. Disconnect glasses and network during capture and during a deferred answer; confirm no automatic restart or late answer. Reopen deliberately to resume.
+12. Test phone lock/pocket behavior where supported, sustained sequential turns and practical battery use; record phone/app/firmware versions and actual observations.
+13. Confirm phone settings, connection testing, saved settings, and packaged-device behavior still work.
+
+All new hands-free physical checks are **pending owner evidence**. Unit tests and a successful package build are not proof of hardware behavior. Record the reviewed commit and results in Issue #21; do not close physical acceptance based on automated tests.
 
 ## Runtime settings for packaged installs
 
@@ -186,3 +196,9 @@ Do not put Cloudflare Access service tokens, backend API keys, chat-orchestrator
 ## Security
 
 This is a client-side app. Anything placed in `VITE_*` variables is potentially client-visible during ordinary development builds. Do not put a permanent Deepgram API key, Cloudflare Access service tokens, Cloudflare Access service-token secrets, backend API keys, chat-orchestrator API keys, basic-memory-store keys, or other privileged secrets here. The only Deepgram credential used by this app is the short-lived access token returned by `g2-gateway`.
+
+## Testing a reviewed candidate (no release required)
+
+After independent native review of the exact PR head, use a separate local checkout of that reviewed commit. Run `npm ci`, `npm test`, `npm run build`, and `npm run build:packaged`. For a QR test, use the existing `npm run dev` and `npm run qr` flow above. For packaged testing, copy `app.json.example` to the ignored `app.json`, set the actual gateway whitelist, and run `npm run pack`. Configure the narrow runtime token only through phone settings. The placeholder gateway is sufficient for a build check, not a functional device test.
+
+Follow the existing local version/cache guidance if Even Hub caches an earlier upload; keep candidate-only version changes out of the PR. Record the reviewed source SHA and local test-package version together. These instructions do not require tags, a merge, CI dispatch, or production deployment. The owner controls installing the reviewed test candidate and recording real G2 acceptance.

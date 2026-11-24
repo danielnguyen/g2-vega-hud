@@ -22,13 +22,14 @@ function renderFrame(state: AppState): HTMLElement {
       frame.appendChild(renderHome(state));
       break;
     case 'connecting':
-      frame.appendChild(renderConnecting());
+      frame.appendChild(renderConnecting(state));
       break;
     case 'listening':
       frame.appendChild(renderListening(state));
       break;
+    case 'stopping':
     case 'thinking':
-      frame.appendChild(renderThinking());
+      frame.appendChild(renderThinking(state));
       break;
     case 'pages':
       frame.appendChild(renderPages(state));
@@ -57,11 +58,13 @@ function renderHome(state: AppState): HTMLElement {
   return section;
 }
 
-function renderConnecting(): HTMLElement {
+function renderConnecting(state: AppState): HTMLElement {
   const section = document.createElement('section');
   section.className = 'screen center';
   section.appendChild(title('CCP Conversation'));
   section.appendChild(text('Connecting...'));
+  appendPreviousAnswer(section, state);
+  section.appendChild(renderConversationButton('Stop', 'stop'));
   section.appendChild(help(CONNECTING_FOOTER));
   return section;
 }
@@ -71,15 +74,19 @@ function renderListening(state: AppState): HTMLElement {
   section.className = 'screen center';
   section.appendChild(title('Listening...'));
   section.appendChild(text(state.liveTranscript || 'Speak now'));
+  appendPreviousAnswer(section, state);
+  section.appendChild(renderConversationButton('Stop', 'stop'));
   section.appendChild(help(LISTENING_FOOTER));
   return section;
 }
 
-function renderThinking(): HTMLElement {
+function renderThinking(state: AppState): HTMLElement {
   const section = document.createElement('section');
   section.className = 'screen center';
   section.appendChild(title('CCP Conversation'));
-  section.appendChild(text('Thinking...'));
+  section.appendChild(text(state.screen === 'stopping' ? 'Stopping microphone...' : 'Thinking...'));
+  appendPreviousAnswer(section, state);
+  section.appendChild(renderConversationButton('Stop waiting', 'stop'));
   return section;
 }
 
@@ -95,7 +102,8 @@ function renderPages(state: AppState): HTMLElement {
 
   section.appendChild(title(`${response.title} ${state.pageIndex + 1}/${response.pages.length}`));
   section.appendChild(text(response.pages[state.pageIndex] ?? ''));
-  section.appendChild(renderConversationButton('Ask a follow-up', 'start'));
+  if (state.homeMessage) section.appendChild(text(state.homeMessage));
+  section.appendChild(renderConversationButton('Resume talking', 'start'));
   section.appendChild(renderConversationButton('Back home', 'home'));
   section.appendChild(help(PAGES_FOOTER));
   return section;
@@ -271,7 +279,7 @@ function renderSettingsLink(labelText = 'Settings'): HTMLElement {
 
 function renderConversationButton(
   labelText: string,
-  action: 'start' | 'home'
+  action: 'start' | 'home' | 'stop'
 ): HTMLElement {
   const button = document.createElement('button');
   button.type = 'button';
@@ -338,4 +346,10 @@ function help(value: string): HTMLElement {
   const element = document.createElement('footer');
   element.textContent = value;
   return element;
+}
+
+function appendPreviousAnswer(section: HTMLElement, state: AppState): void {
+  if (!state.response) return;
+  section.appendChild(subtitle(`${state.response.title} ${state.pageIndex + 1}/${state.response.pages.length}`));
+  section.appendChild(text(state.response.pages[state.pageIndex] ?? ''));
 }

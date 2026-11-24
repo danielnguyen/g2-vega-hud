@@ -13,7 +13,7 @@ export interface SpeechToTextSession {
 }
 
 export interface SpeechToTextProvider {
-  start(token: string, handlers: SpeechToTextHandlers): Promise<SpeechToTextSession>;
+  start(token: string, handlers: SpeechToTextHandlers, signal?: AbortSignal): Promise<SpeechToTextSession>;
 }
 
 export function createSpeechToTextProvider(provider: string): SpeechToTextProvider | null {

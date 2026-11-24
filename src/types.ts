@@ -7,6 +7,7 @@ export type Screen =
   | 'connecting'
   | 'listening'
   | 'thinking'
+  | 'stopping'
   | 'pages'
   | 'error'
   | 'settings';

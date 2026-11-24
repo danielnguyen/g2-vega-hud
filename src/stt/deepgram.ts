@@ -17,8 +17,10 @@ type DeepgramConnection = Awaited<ReturnType<DeepgramClient['listen']['v2']['con
 export class DeepgramSpeechToTextProvider implements SpeechToTextProvider {
   async start(
     token: string,
-    handlers: SpeechToTextHandlers
+    handlers: SpeechToTextHandlers,
+    signal?: AbortSignal
   ): Promise<SpeechToTextSession> {
+    signal?.throwIfAborted();
     const client = new DeepgramClient({ accessToken: token, reconnect: false });
     const connection = await client.listen.v2.connect({
       model: FLUX_MODEL,
@@ -29,12 +31,21 @@ export class DeepgramSpeechToTextProvider implements SpeechToTextProvider {
     });
     const session = new DeepgramSpeechToTextSession(connection, handlers);
 
-    connection.connect();
+    const abort = () => session.cancel();
+    if (signal?.aborted) {
+      session.cancel();
+      signal.throwIfAborted();
+    }
+    signal?.addEventListener('abort', abort, { once: true });
     try {
+      connection.connect();
       await connection.waitForOpen();
+      signal?.throwIfAborted();
     } catch {
       session.cancel();
       throw new Error('speech_connection_failed');
+    } finally {
+      signal?.removeEventListener('abort', abort);
     }
 
     return session;
@@ -51,6 +62,7 @@ class DeepgramSpeechToTextSession implements SpeechToTextSession {
     private readonly handlers: SpeechToTextHandlers
   ) {
     connection.on('message', (message) => {
+      if (this.terminal) return;
       if (message.type === 'Error') {
         this.fail();
         return;
