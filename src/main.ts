@@ -5,7 +5,7 @@ import {
   type EvenInputBinding,
   type NormalizedEvenInputEvent
 } from './even/evenInput';
-import { checkGateway, createSttSession, pollWork, sendTurn } from './gatewayClient';
+import { checkGateway } from './gatewayClient';
 import { bindKeyboardInput, type InputEventName } from './input';
 import { render } from './renderer';
 import {
@@ -17,7 +17,7 @@ import {
   markRequestSuccess
 } from './runtimeStatus';
 import { clearSettings, saveSettings, type RuntimeSettings } from './settings';
-import { createSpeechToTextProvider, type SpeechToTextSession } from './speechToText';
+import { Conversation } from './conversation';
 import {
   applyConfig,
   backHome,
@@ -30,17 +30,11 @@ import {
   showPages,
   showThinking
 } from './state';
-import type { AppState, DebugState, GatewayPageResponse } from './types';
+import type { AppState, DebugState } from './types';
 import { APP_VERSION } from './version';
 import './style.css';
 
 const EMPTY_RESPONSE_MESSAGE = 'Gateway returned no renderable pages.';
-
-type ActiveCapture = {
-  session: SpeechToTextSession | null;
-  microphoneEnabled: boolean;
-  settled: boolean;
-};
 
 const root = document.querySelector<HTMLDivElement>('#app');
 
@@ -59,9 +53,39 @@ let state: AppState = initialState(
 let evenDisplay: EvenDisplay | null = null;
 let evenInput: EvenInputBinding | null = null;
 let config: AppConfig | null = null;
-let activeCapture: ActiveCapture | null = null;
-let activeConversationId: string | null = null;
-let ccpTurnPending = false;
+const conversation = new Conversation({
+  ready: () => Boolean(evenInput && evenDisplay),
+  microphone: enabled => evenInput!.setMicrophoneEnabled(enabled),
+  phase: (phase, transcript) => {
+    if (phase === 'connecting') commit(showConnecting(state));
+    else if (phase === 'listening') commit(showListening(state, transcript));
+    else if (phase === 'stopping') commit({ ...state, screen: 'stopping', liveTranscript: '' });
+    else commit({
+      ...showThinking(state), runtimeStatus: markRequestStart(state.runtimeStatus),
+      debug: { ...state.debug, lastError: null, lastGatewayRequest: {
+        label: 'voice-turn', operation: 'conversation', status: 'pending', updatedAt: new Date().toISOString()
+      } }
+    });
+  },
+  answer: response => commit({
+    ...showPages(state, response),
+    runtimeStatus: markRequestSuccess(state.runtimeStatus, response.status ?? 'ok'),
+    debug: { ...state.debug, lastError: null, lastGatewayRequest: {
+      label: 'voice-turn', operation: 'conversation', status: response.status ?? 'ok',
+      updatedAt: new Date().toISOString()
+    } }
+  }),
+  stopped: message => commit({
+    ...state, screen: state.response ? 'pages' : 'home', liveTranscript: '', homeMessage: message
+  }),
+  error: message => commit({
+    ...withDebugError(showError(state, message), message),
+    runtimeStatus: markRequestFailure(state.runtimeStatus, message),
+    debug: { ...state.debug, lastError: message, lastGatewayRequest: {
+      label: 'voice-turn', operation: 'conversation', status: 'failed', updatedAt: new Date().toISOString()
+    } }
+  })
+});
 
 function commit(nextState: AppState): void {
   state = nextState;
@@ -80,6 +104,9 @@ function bindConversationControls(): void {
       const action = element.dataset.conversationAction;
       if (action === 'start') {
         void startListening();
+      }
+      if (action === 'stop') {
+        conversation.stop();
       }
       if (action === 'home') {
         commit(backHome(state));
@@ -124,29 +151,18 @@ function bindSettingsControls(): void {
 }
 
 function handleInput(eventName: InputEventName): void {
-  if (state.screen === 'home') {
-    if (eventName === 'press') {
-      void startListening();
-    }
-    return;
-  }
-
-  if (state.screen === 'connecting' || state.screen === 'listening') {
-    if (eventName === 'doublePress') {
-      void cancelActiveCapture();
-    }
-    return;
-  }
-
-  if (state.screen === 'pages') {
+  if (state.response && ['pages', 'connecting', 'listening', 'thinking', 'stopping'].includes(state.screen)) {
     if (eventName === 'up') commit(movePage(state, -1));
     if (eventName === 'down') commit(movePage(state, 1));
-    if (eventName === 'press') void startListening();
-    if (eventName === 'doublePress') commit(backHome(state));
+  }
+  if (conversation.busy) {
+    if (eventName === 'doublePress') conversation.stop();
     return;
   }
-
-  if (state.screen === 'error' && (eventName === 'press' || eventName === 'doublePress')) {
+  if (state.screen === 'home' || state.screen === 'pages') {
+    if (eventName === 'press') void startListening();
+    if (eventName === 'doublePress') commit(backHome(state));
+  } else if (state.screen === 'error' && (eventName === 'press' || eventName === 'doublePress')) {
     commit(backHome(state));
   }
 }
@@ -172,7 +188,7 @@ async function initializeEvenInput(): Promise<void> {
   evenInput = await bindEvenInput({
     onInput: handleEvenInput,
     onPcm: (chunk) => {
-      activeCapture?.session?.sendPcm(chunk);
+      conversation.sendPcm(chunk);
     },
     onExit: cleanupForExit
   });
@@ -187,285 +203,16 @@ async function initializeEvenDisplay(): Promise<void> {
 }
 
 async function startListening(): Promise<void> {
-  if (activeCapture || ccpTurnPending) {
-    return;
-  }
-
+  if (conversation.busy) return;
   if (!config) {
-    commit({
-      ...openSettings(state, state.settingsDraft, 'Settings required before use.'),
-      runtimeStatus: markConfigured(state.runtimeStatus, false),
-      debug: {
-        ...state.debug,
-        lastError: 'Settings required before use.'
-      }
-    });
+    commit(openSettings(state, state.settingsDraft, 'Settings required before use.'));
     return;
   }
-
-  if (!evenInput) {
-    commit(withDebugError(showError(state, 'G2 microphone unavailable.'), 'G2 microphone unavailable.'));
-    return;
-  }
-
-  const capture: ActiveCapture = {
-    session: null,
-    microphoneEnabled: false,
-    settled: false
-  };
-  activeCapture = capture;
-  commit(showConnecting(state));
-  let failureStage: 'bootstrap' | 'provider' = 'bootstrap';
-
-  try {
-    const bootstrap = await createSttSession(config);
-    if (activeCapture !== capture) {
-      return;
-    }
-
-    failureStage = 'provider';
-    const provider = createSpeechToTextProvider(bootstrap.provider);
-    if (!provider) {
-      throw new Error('unsupported_speech_provider');
-    }
-
-    const session = await provider.start(bootstrap.token, {
-      onTranscriptUpdate: (transcript) => {
-        if (activeCapture === capture && !capture.settled) {
-          commit(showListening(state, transcript));
-        }
-      },
-      onUtteranceComplete: (transcript) => {
-        void completeUtterance(capture, transcript);
-      },
-      onError: () => {
-        void failActiveCapture(capture);
-      }
-    });
-
-    if (activeCapture !== capture) {
-      session.cancel();
-      return;
-    }
-
-    capture.session = session;
-    capture.microphoneEnabled = true;
-    await evenInput.setMicrophoneEnabled(true);
-
-    if (activeCapture !== capture) {
-      await terminateCapture(capture, 'cancel');
-      return;
-    }
-
-    commit(showListening(state));
-  } catch (error) {
-    if (activeCapture !== capture) {
-      return;
-    }
-
-    activeCapture = null;
-    capture.settled = true;
-    await terminateCapture(capture, 'cancel');
-    commit(
-      withDebugError(
-        showError(state, 'Speech service unavailable.'),
-        failureStage === 'bootstrap'
-          ? sttBootstrapDebugMessage(error)
-          : 'STT provider connection failed.'
-      )
-    );
-  }
-}
-
-async function completeUtterance(capture: ActiveCapture, transcript: string): Promise<void> {
-  if (activeCapture !== capture || capture.settled) {
-    return;
-  }
-
-  capture.settled = true;
-  activeCapture = null;
-  await terminateCapture(capture, 'finish');
-
-  const finalTranscript = transcript.trim();
-  if (!finalTranscript) {
-    commit(backHome(state, 'Nothing heard'));
-    return;
-  }
-
-  await runConversationTurn(finalTranscript);
-}
-
-async function failActiveCapture(capture: ActiveCapture): Promise<void> {
-  if (activeCapture !== capture || capture.settled) {
-    return;
-  }
-
-  capture.settled = true;
-  activeCapture = null;
-  await terminateCapture(capture, 'cancel');
-  commit(
-    withDebugError(
-      showError(state, 'Speech service unavailable.'),
-      'STT provider stream failed.'
-    )
-  );
-}
-
-async function cancelActiveCapture(): Promise<void> {
-  const capture = activeCapture;
-  if (!capture) {
-    return;
-  }
-
-  activeCapture = null;
-  capture.settled = true;
-  await terminateCapture(capture, 'cancel');
-  commit(backHome(state));
-}
-
-async function terminateCapture(
-  capture: ActiveCapture,
-  disposition: 'finish' | 'cancel'
-): Promise<void> {
-  if (capture.microphoneEnabled) {
-    capture.microphoneEnabled = false;
-    try {
-      await evenInput?.setMicrophoneEnabled(false);
-    } catch {
-      // Cleanup continues even if the bridge is already exiting.
-    }
-  }
-
-  const session = capture.session;
-  capture.session = null;
-  if (!session) {
-    return;
-  }
-
-  try {
-    if (disposition === 'finish') {
-      session.finish();
-    } else {
-      session.cancel();
-    }
-  } catch {
-    // Provider cleanup is best effort after microphone shutdown.
-  }
-}
-
-async function runConversationTurn(transcript: string): Promise<void> {
-  if (ccpTurnPending || !config) {
-    return;
-  }
-
-  ccpTurnPending = true;
-  const conversationId = activeConversationId;
-  commit({
-    ...showThinking(state),
-    runtimeStatus: markRequestStart(state.runtimeStatus),
-    debug: {
-      ...state.debug,
-      lastGatewayRequest: {
-        label: 'voice-turn',
-        operation: 'conversation',
-        status: 'pending',
-        updatedAt: new Date().toISOString()
-      },
-      lastError: null
-    }
-  });
-
-  try {
-    const submission = await sendTurn(config, transcript, {
-      inputMode: 'voice_transcribed',
-      ...(conversationId ? { conversationId } : {})
-    });
-
-    let response: GatewayPageResponse;
-    if ('delivery_status' in submission) {
-      activeConversationId = submission.conversation_id;
-      const work = await pollWork(config, submission);
-      if (work.state === 'failed') throw new Error('Request could not be completed.');
-      response = {
-        request_id: work.request_id,
-        conversation_id: work.conversation_id,
-        title: submission.title,
-        pages: work.pages,
-        source: work.source,
-        raw_length: work.raw_length
-      };
-    } else {
-      response = submission;
-    }
-
-    updateConversationReference(response);
-
-    if (!hasRenderablePages(response.pages)) {
-      throw new Error(EMPTY_RESPONSE_MESSAGE);
-    }
-
-    commit({
-      ...showPages(state, response),
-      runtimeStatus: markRequestSuccess(state.runtimeStatus, response.status ?? 'ok'),
-      debug: {
-        ...state.debug,
-        lastGatewayRequest: {
-          label: 'voice-turn',
-          operation: 'conversation',
-          status: response.status ?? 'ok',
-          updatedAt: new Date().toISOString()
-        },
-        lastError: null
-      }
-    });
-  } catch (error) {
-    const message = toUserErrorMessage(error);
-    commit({
-      ...showError(state, message),
-      runtimeStatus: markRequestFailure(state.runtimeStatus, message),
-      debug: {
-        ...state.debug,
-        lastGatewayRequest: {
-          label: 'voice-turn',
-          operation: 'conversation',
-          status: 'failed',
-          updatedAt: new Date().toISOString()
-        },
-        lastError: message
-      }
-    });
-  } finally {
-    ccpTurnPending = false;
-  }
-}
-
-function updateConversationReference(response: GatewayPageResponse): void {
-  if (response.conversation_disposition === 'non_current') {
-    activeConversationId = null;
-  } else if (response.conversation_id) {
-    activeConversationId = response.conversation_id;
-  }
+  conversation.start(config);
 }
 
 function cleanupForExit(): void {
-  const capture = activeCapture;
-  activeCapture = null;
-
-  if (capture) {
-    capture.settled = true;
-    if (capture.microphoneEnabled) {
-      capture.microphoneEnabled = false;
-      void evenInput?.setMicrophoneEnabled(false).catch(() => undefined);
-    }
-
-    const session = capture.session;
-    capture.session = null;
-    try {
-      session?.cancel();
-    } catch {
-      // The surface is exiting; cleanup remains best effort.
-    }
-  }
+  conversation.stop(true);
 }
 
 function toUserErrorMessage(error: unknown): string {
@@ -490,31 +237,6 @@ function toUserErrorMessage(error: unknown): string {
   }
 
   return 'Gateway request failed.';
-}
-
-function sttBootstrapDebugMessage(error: unknown): string {
-  if (!(error instanceof Error)) {
-    return 'STT bootstrap failed.';
-  }
-
-  const httpStatus = /^Gateway returned HTTP (\d+)$/.exec(error.message)?.[1];
-  if (httpStatus) {
-    return `STT bootstrap failed (HTTP ${httpStatus}).`;
-  }
-
-  if (error.message === 'Gateway timed out') {
-    return 'STT bootstrap timed out.';
-  }
-
-  if (error.message === 'Could not reach gateway') {
-    return 'STT bootstrap could not reach gateway.';
-  }
-
-  if (error.message === 'Invalid STT session response') {
-    return 'STT bootstrap returned an invalid response.';
-  }
-
-  return 'STT bootstrap failed.';
 }
 
 async function bootstrap(): Promise<void> {
@@ -700,10 +422,6 @@ function buildDebugState(currentSettings: RuntimeSettings): DebugState {
   };
 }
 
-function hasRenderablePages(pages: string[]): boolean {
-  return pages.some((page) => page.trim().length > 0);
-}
-
 function withCurrentSettings(nextState: AppState, currentSettings: RuntimeSettings): AppState {
   return {
     ...nextState,
@@ -728,6 +446,7 @@ bindKeyboardInput(handleInput);
 void initializeEvenInput();
 void initializeEvenDisplay();
 window.addEventListener('beforeunload', cleanupForExit);
+window.addEventListener('offline', cleanupForExit);
 commit(state);
 bootstrap().catch(() => {
   commit({

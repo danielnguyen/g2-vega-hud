@@ -1,9 +1,10 @@
-import { OsEventTypeList, waitForEvenAppBridge, type EvenHubEvent } from '@evenrealities/even_hub_sdk';
+import { DeviceConnectType, type DeviceStatus, OsEventTypeList, waitForEvenAppBridge, type EvenHubEvent } from '@evenrealities/even_hub_sdk';
 import type { InputEventName } from '../input';
 import type { GlassesInputDebugEvent } from '../types';
 
 type EvenInputBridgeLike = {
   onEvenHubEvent(callback: (event: EvenHubEvent) => void): () => void;
+  onDeviceStatusChanged(callback: (status: DeviceStatus) => void): () => void;
   audioControl(enabled: boolean): Promise<boolean>;
 };
 
@@ -18,7 +19,7 @@ export type EvenInputHandlers = {
 };
 
 export type EvenInputBinding = {
-  setMicrophoneEnabled(enabled: boolean): Promise<void>;
+  setMicrophoneEnabled(enabled: boolean): Promise<boolean>;
   dispose(): void;
 };
 
@@ -49,12 +50,18 @@ export async function bindEvenInput(
       }
     });
 
+    const unsubscribeStatus = bridge.onDeviceStatusChanged((status) => {
+      if (status.connectType === DeviceConnectType.Disconnected ||
+          status.connectType === DeviceConnectType.ConnectionFailed) handlers.onExit();
+    });
+
     return {
-      async setMicrophoneEnabled(enabled: boolean): Promise<void> {
-        await bridge.audioControl(enabled);
+      async setMicrophoneEnabled(enabled: boolean): Promise<boolean> {
+        return bridge.audioControl(enabled);
       },
       dispose(): void {
         unsubscribe();
+        unsubscribeStatus();
       }
     };
   } catch {

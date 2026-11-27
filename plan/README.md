@@ -11,7 +11,8 @@ tap
 → g2-gateway
 → Chat Orchestrator / CCP
 → answer on glasses
-→ tap for follow-up
+→ fresh listening session for follow-up
+→ double tap to stop / silence timeout
 ```
 
 The glasses are a lightweight interaction surface. Durable conversation ownership, history, retrieval, and reasoning remain server-side in CCP.
@@ -36,7 +37,7 @@ The client retains only the current server-returned `conversation_id` in process
 
 The current baseline includes:
 
-- tap-to-talk CCP Conversation Mode;
+- deliberately started hands-free CCP conversation with tap-to-resume fallback;
 - G2 microphone capture using the Even bridge;
 - raw PCM signed 16-bit little-endian, 16 kHz, mono routing;
 - an application-owned speech-to-text provider boundary;
@@ -45,7 +46,7 @@ The current baseline includes:
 - live transcript display and automatic Flux `EndOfTurn` completion;
 - one CCP turn per completed utterance;
 - response pagination on the glasses;
-- tap-to-follow-up with server-owned conversation continuity;
+- sequential follow-ups with server-owned conversation continuity;
 - cancellation and microphone cleanup paths;
 - phone-side runtime settings, connection testing, and bounded diagnostics;
 - packaged builds that disable runtime `.env` fallback;
@@ -84,7 +85,7 @@ Telegram may still be used elsewhere as a server-side human-readable archive or 
 
 Unless explicitly reintroduced by a new product decision:
 
-- ambient or continuous listening;
+- ambient/background listening outside a deliberately started, bounded session;
 - wake words;
 - camera/context sensing;
 - autonomous interventions;
@@ -99,3 +100,7 @@ Unless explicitly reintroduced by a new product decision:
 When a physical test fails, instrument the boundary and identify the first failing hop before changing architecture or configuration. Do not infer provider, gateway, microphone, or host behavior from a single generic user-facing error.
 
 The concise current acceptance record is [`01_Requirement_Checklist.md`](01_Requirement_Checklist.md).
+
+## Issue #21 candidate
+
+The client rearms fresh single-utterance sessions only after successful terminal answers and confirmed microphone cleanup. Capture uses 30-second initial silence and 60-second absolute limits; valid deferred work remains unbounded with local cancellation. Previous answer pages remain readable and scrollable during rearm. Automated lifecycle evidence is separate from pending owner G2 acceptance; see the README candidate-build instructions and acceptance record. No new mode or downstream contract is introduced.

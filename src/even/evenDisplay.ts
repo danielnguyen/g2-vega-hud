@@ -57,7 +57,7 @@ export async function createEvenDisplay(timeoutMs = 1500): Promise<EvenDisplay |
   try {
     const bridge = await withTimeout(waitForEvenAppBridge(), timeoutMs);
     const display = new EvenGlassesDisplay(bridge as unknown as EvenBridgeLike);
-    await display.initialize();
+    await withTimeout(display.initialize(), timeoutMs);
     return display;
   } catch {
     return null;
@@ -66,6 +66,8 @@ export async function createEvenDisplay(timeoutMs = 1500): Promise<EvenDisplay |
 
 class EvenGlassesDisplay implements EvenDisplay {
   private initialized = false;
+  private writes: Promise<void> = Promise.resolve();
+  private revision = 0;
 
   constructor(private readonly bridge: EvenBridgeLike) {}
 
@@ -82,23 +84,28 @@ class EvenGlassesDisplay implements EvenDisplay {
     };
 
     const result = await this.bridge.createStartUpPageContainer(page);
-    this.initialized = result === 0;
+    if (result !== 0) throw new Error('Glasses startup page unavailable');
+    this.initialized = true;
   }
 
   async render(state: AppState): Promise<void> {
     if (!this.initialized) return;
 
     const frame = frameForState(state);
-
-    await Promise.all([
-      this.bridge.textContainerUpgrade(textUpgrade(TITLE_ID, 'title', frame.title)),
-      this.bridge.textContainerUpgrade(textUpgrade(BODY_ID, 'body', frame.body)),
-      this.bridge.textContainerUpgrade(textUpgrade(HELP_ID, 'help', frame.help))
-    ]);
+    const revision = ++this.revision;
+    this.writes = this.writes.catch(() => undefined).then(async () => {
+      if (revision !== this.revision) return;
+      await Promise.allSettled([
+        this.bridge.textContainerUpgrade(textUpgrade(TITLE_ID, 'title', frame.title)),
+        this.bridge.textContainerUpgrade(textUpgrade(BODY_ID, 'body', frame.body)),
+        this.bridge.textContainerUpgrade(textUpgrade(HELP_ID, 'help', frame.help))
+      ]);
+    });
+    return this.writes;
   }
 }
 
-function frameForState(state: AppState): Frame {
+export function frameForState(state: AppState): Frame {
   if (state.screen === 'settings') {
     return {
       title: state.debug.appVersion,
@@ -115,27 +122,19 @@ function frameForState(state: AppState): Frame {
     };
   }
 
-  if (state.screen === 'connecting') {
+  if (['connecting', 'listening', 'thinking', 'stopping'].includes(state.screen)) {
+    const status = state.screen === 'connecting' ? 'Connecting...' :
+      state.screen === 'listening' ? 'Listening...' :
+      state.screen === 'stopping' ? 'Stopping microphone...' : 'Thinking...';
+    const page = state.response;
     return {
-      title: 'CCP Conversation',
-      body: 'Connecting...',
-      help: CONNECTING_FOOTER
-    };
-  }
-
-  if (state.screen === 'listening') {
-    return {
-      title: 'Listening...',
-      body: formatForGlasses(state.liveTranscript || 'Speak now'),
-      help: LISTENING_FOOTER
-    };
-  }
-
-  if (state.screen === 'thinking') {
-    return {
-      title: 'CCP Conversation',
-      body: 'Thinking...',
-      help: THINKING_FOOTER
+      title: page ? `${status} ${state.pageIndex + 1}/${page.pages.length}` : status,
+      body: page ? formatForGlasses(page.pages[state.pageIndex] ?? '') :
+        formatForGlasses(state.liveTranscript || (state.screen === 'listening' ? 'Speak now' : status)),
+      help: state.screen === 'listening' && state.liveTranscript
+        ? normalizeForEvenDisplay(state.liveTranscript).slice(-80)
+        : state.screen === 'thinking' ? THINKING_FOOTER :
+          state.screen === 'listening' ? LISTENING_FOOTER : CONNECTING_FOOTER
     };
   }
 

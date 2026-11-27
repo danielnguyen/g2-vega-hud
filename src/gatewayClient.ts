@@ -8,6 +8,7 @@ const NETWORK_ERROR = 'Could not reach gateway';
 export type SendTurnOptions = {
   inputMode?: 'tap_menu' | 'typed' | 'voice_transcribed';
   conversationId?: string;
+  signal?: AbortSignal;
 };
 
 export async function sendTurn(
@@ -20,6 +21,7 @@ export async function sendTurn(
     config,
     '/g2/turn',
     {
+      signal: options.signal,
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
@@ -39,13 +41,13 @@ export async function sendTurn(
 }
 
 export async function getWork(
-  config: AppConfig, workId: string, conversationId: string
+  config: AppConfig, workId: string, conversationId: string, signal?: AbortSignal
 ): Promise<GatewayWorkResponse> {
   if (!isUuid(workId) || !isUuid(conversationId)) throw new Error('Invalid work identity');
   return fetchGatewayJson<GatewayWorkResponse>(
     config,
     `/g2/work-items/${encodeURIComponent(workId)}?conversation_id=${encodeURIComponent(conversationId)}`,
-    { method: 'GET' },
+    { method: 'GET', signal },
     DEFAULT_TIMEOUT_MS,
     (value, status) => {
       if (status !== 200 || !isWorkResponse(value) ||
@@ -58,12 +60,12 @@ export async function getWork(
 }
 
 export async function pollWork(
-  config: AppConfig, deferred: GatewayDeferredResponse, pollIntervalMs = 1000
+  config: AppConfig, deferred: GatewayDeferredResponse, pollIntervalMs = 1000, signal?: AbortSignal
 ): Promise<Extract<GatewayWorkResponse, { state: 'completed' | 'failed' }>> {
   const { work_id, conversation_id, request_id } = deferred;
   while (true) {
-    await new Promise<void>((resolve) => setTimeout(resolve, pollIntervalMs));
-    const work = await getWork(config, work_id, conversation_id);
+    await abortableDelay(pollIntervalMs, signal);
+    const work = await getWork(config, work_id, conversation_id, signal);
     if (work.request_id !== request_id) throw new Error('Invalid gateway work response');
     if (work.state === 'completed' || work.state === 'failed') return work;
   }
@@ -71,12 +73,14 @@ export async function pollWork(
 
 export async function createSttSession(
   config: AppConfig,
-  timeoutMs = DEFAULT_TIMEOUT_MS
+  timeoutMs = DEFAULT_TIMEOUT_MS,
+  signal?: AbortSignal
 ): Promise<SttSessionBootstrap> {
   const result = await fetchGatewayJson<unknown>(
     config,
     '/g2/stt/session',
     {
+      signal,
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({})
@@ -105,7 +109,10 @@ async function fetchGatewayJson<T>(
   timeoutMs: number,
   validate?: (value: unknown, status: number) => T
 ): Promise<T> {
+  init.signal?.throwIfAborted();
   const controller = new AbortController();
+  const abort = () => controller.abort();
+  init.signal?.addEventListener('abort', abort, { once: true });
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
@@ -123,8 +130,10 @@ async function fetchGatewayJson<T>(
     }
 
     const value: unknown = await response.json();
+    init.signal?.throwIfAborted();
     return validate ? validate(value, response.status) : value as T;
   } catch (error) {
+    init.signal?.throwIfAborted();
     if (validate && error instanceof SyntaxError) {
       throw new Error('Invalid gateway response');
     }
@@ -139,6 +148,7 @@ async function fetchGatewayJson<T>(
     throw error;
   } finally {
     clearTimeout(timeoutId);
+    init.signal?.removeEventListener('abort', abort);
   }
 }
 
@@ -211,4 +221,19 @@ function isSttSessionBootstrap(value: unknown): value is SttSessionBootstrap {
 
 function isAbortError(error: unknown): boolean {
   return error instanceof DOMException && error.name === 'AbortError';
+}
+
+function abortableDelay(ms: number, signal?: AbortSignal): Promise<void> {
+  signal?.throwIfAborted();
+  return new Promise((resolve, reject) => {
+    const abort = () => {
+      clearTimeout(timer);
+      reject(signal?.reason);
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', abort);
+      resolve();
+    }, ms);
+    signal?.addEventListener('abort', abort, { once: true });
+  });
 }

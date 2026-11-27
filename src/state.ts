@@ -27,7 +27,6 @@ export function showConnecting(state: AppState): AppState {
   return {
     ...state,
     screen: 'connecting',
-    response: null,
     liveTranscript: '',
     homeMessage: null,
     errorMessage: null
