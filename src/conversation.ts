@@ -36,6 +36,8 @@ export class Conversation {
 
   get busy(): boolean { return this.controller !== null; }
 
+  get canExit(): boolean { return !this.busy && !this.micUncertain; }
+
   start(config: AppConfig): void {
     if (this.busy || this.exited) return;
     if (this.micUncertain) { this.deps.error(MIC_UNCERTAIN); return; }

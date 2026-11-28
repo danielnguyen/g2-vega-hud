@@ -45,6 +45,10 @@ Before treating a new packaged build as production-ready, verify on the real G2:
 
 Issue #21 physical acceptance is pending owner testing of the independently reviewed exact head. Record candidate SHA, package version, device/app/firmware versions and results; automated tests do not make these checks PASS. Use the README supported candidate instructions without tagging, merging or deploying.
 
+## Issue #24 fast-follow
+
+A first active double tap stops; a distinct idle double tap requests the Even native exit dialog directly. Mode `1` follows the root-page lifecycle contract; private packaging has no documented exception for mode `0`. The gesture waits for completed, confirmed microphone cleanup and suppresses double-tap bursts for 600 ms. Single-tap resume and stopped answer scrolling remain available. Host failure/absence is reported without claiming exit. Automated evidence is in the input, conversation and Even lifecycle tests; actual G2 confirmation/closure remains `VERIFY` for owner ordinary use after exact-head review (README candidate instructions).
+
 ## Retired requirements
 
 No active requirement in this file covers Brief, Recall, Status, Dashboard/Ask mode navigation, direct Telegram/MTProto authentication, Telegram bot discovery, bot selection, Telegram reply correlation, or Telegram credential/session storage in the HUD. Those directions are intentionally retired rather than deferred phases of this plan.

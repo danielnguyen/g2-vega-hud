@@ -71,3 +71,29 @@ describe('Even lifecycle and answer surface', () => {
     binding.dispose(); expect(unsubscribe).toHaveBeenCalled(); expect(unsubscribeStatus).toHaveBeenCalled();
   });
 });
+
+it.each([true, false, 'reject', 'unsupported', 'timeout'] as const)('handles %s host shutdown using the root-page API', async result => {
+  vi.useFakeTimers();
+  const shutdown = vi.fn();
+  if (result === 'reject') shutdown.mockRejectedValue(new Error('bridge'));
+  else if (result === 'timeout') shutdown.mockReturnValue(new Promise(() => {}));
+  else shutdown.mockResolvedValue(result);
+  vi.mocked(waitForEvenAppBridge).mockResolvedValue({
+    onEvenHubEvent: () => () => {}, onDeviceStatusChanged: () => () => {},
+    ...(result === 'unsupported' ? {} : { shutDownPageContainer: shutdown })
+  } as any);
+  const binding = (await bindEvenInput({ onInput: vi.fn(), onPcm: vi.fn(), onExit: vi.fn() }))!;
+  const first = binding.requestExit(); const duplicate = binding.requestExit();
+  await vi.runAllTimersAsync();
+  expect(await first).toBe(result === true ? 'requested' : result === 'unsupported' ? 'unsupported' : 'failed');
+  expect(await duplicate).toBe(await first);
+  if (result !== 'unsupported') {
+    expect(shutdown).toHaveBeenCalledExactlyOnceWith(1);
+  }
+  if (result === 'timeout') {
+    expect(await binding.requestExit()).toBe('failed');
+    expect(shutdown).toHaveBeenCalledTimes(1);
+  }
+  binding.dispose();
+  expect(vi.getTimerCount()).toBe(0); vi.useRealTimers();
+});

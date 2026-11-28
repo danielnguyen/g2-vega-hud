@@ -2,6 +2,7 @@ export type InputEventName = 'up' | 'down' | 'press' | 'doublePress';
 
 export function bindKeyboardInput(handler: (eventName: InputEventName) => void): void {
   window.addEventListener('keydown', (event) => {
+    if (event.repeat) return;
     switch (event.key) {
       case 'ArrowUp':
         handler('up');

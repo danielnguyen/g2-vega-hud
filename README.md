@@ -22,8 +22,12 @@ Even G2 / Even app WebView
 Home: tap to start
 Connecting / listening / thinking: double tap to stop
 Answer remains visible: scroll pages while connecting or listening
-Stopped / idle: tap to resume; double tap from answer to go home
+Stopped / idle: tap to resume; double tap to request host exit
 ```
+
+After stopping, wait for cleanup and at least 600 ms without another double-tap event before double tapping again. Duplicate bursts and taps during cleanup cannot exit or restart capture. Answers remain readable and scrollable while stopped. In a browser without the Even bridge, Escape explains that you must close the tab; it does not pretend to close the host. Unconfirmed microphone shutdown blocks this shortcut and capture; use the Even host to close the app and verify the microphone is off.
+
+The installed WebView SDK `0.0.10` exposes `shutDownPageContainer`: mode `0` requests immediate exit, mode `1` requests native confirmation. Vega has one root container, including the answer view. The official [WebView page lifecycle](https://hub.evenrealities.com/docs/build/page-lifecycle) requires mode `1` on root pages; [submission guidance](https://hub.evenrealities.com/docs/ship/app-submission) says confirmation also closes the phone WebView. [Private testing documentation](https://hub.evenrealities.com/docs/test/private-testing) provides no root-page exception. Accordingly the shortcut calls `shutDownPageContainer(1)` directly, without a Vega menu. Native confirmation remains required; no silent-exit bypass is used. A positive bridge reply means the request was accepted, not that the app has closed. A false, rejected, missing or timed-out API reports failure/unavailability. Cancel the system dialog to remain in Vega and tap to resume.
 
 The microphone starts only after the glasses startup page and a fresh STT WebSocket are ready, and `Listening...` appears only after microphone enable is acknowledged. Each utterance stops capture and confirms microphone shutdown before sending to CCP. The previous answer and page position remain visible during rearm; live transcript text appears in the glasses footer when an answer is displayed. A new answer starts at page one.
 
@@ -62,7 +66,7 @@ Do not commit `.env`.
 ArrowUp      previous response page
 ArrowDown    next response page
 Enter        talk / follow-up
-Escape       cancel / home
+Escape       stop / request host exit (ignore held-key repeats)
 ```
 
 ## Even Hub testing
@@ -202,3 +206,7 @@ This is a client-side app. Anything placed in `VITE_*` variables is potentially 
 After independent native review of the exact PR head, use a separate local checkout of that reviewed commit. Run `npm ci`, `npm test`, `npm run build`, and `npm run build:packaged`. For a QR test, use the existing `npm run dev` and `npm run qr` flow above. For packaged testing, copy `app.json.example` to the ignored `app.json`, set the actual gateway whitelist, and run `npm run pack`. Configure the narrow runtime token only through phone settings. The placeholder gateway is sufficient for a build check, not a functional device test.
 
 Follow the existing local version/cache guidance if Even Hub caches an earlier upload; keep candidate-only version changes out of the PR. Record the reviewed source SHA and local test-package version together. These instructions do not require tags, a merge, CI dispatch, or production deployment. The owner controls installing the reviewed test candidate and recording real G2 acceptance.
+
+## Issue #24 candidate acceptance
+
+Automated regressions cover first-tap stop, duplicate event bursts, delayed microphone cleanup, stale work, idle exit requests, root mode `1`, shutdown failures/timeouts, keyboard fallback and resume. After independent review of the exact head, the owner should check the second distinct double tap during ordinary G2 use: native confirmation appears without opening the Vega menu, confirming closes the glasses page and phone WebView, cancelling preserves the answer and permits resume, and the microphone remains off. Check the supported private packaged build as well as any QR prototype. These physical observations remain pending; no new timed soak or release is required. Paging issue #23 remains separate.

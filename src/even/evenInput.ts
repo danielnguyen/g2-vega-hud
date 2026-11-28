@@ -1,4 +1,5 @@
 import { DeviceConnectType, type DeviceStatus, OsEventTypeList, waitForEvenAppBridge, type EvenHubEvent } from '@evenrealities/even_hub_sdk';
+import type { ExitResult } from '../conversationInput';
 import type { InputEventName } from '../input';
 import type { GlassesInputDebugEvent } from '../types';
 
@@ -6,6 +7,7 @@ type EvenInputBridgeLike = {
   onEvenHubEvent(callback: (event: EvenHubEvent) => void): () => void;
   onDeviceStatusChanged(callback: (status: DeviceStatus) => void): () => void;
   audioControl(enabled: boolean): Promise<boolean>;
+  shutDownPageContainer?(exitMode: number): Promise<boolean>;
 };
 
 export type NormalizedEvenInputEvent = GlassesInputDebugEvent & {
@@ -19,6 +21,7 @@ export type EvenInputHandlers = {
 };
 
 export type EvenInputBinding = {
+  requestExit(): Promise<ExitResult>;
   setMicrophoneEnabled(enabled: boolean): Promise<boolean>;
   dispose(): void;
 };
@@ -55,7 +58,22 @@ export async function bindEvenInput(
           status.connectType === DeviceConnectType.ConnectionFailed) handlers.onExit();
     });
 
+    let pendingExit: Promise<ExitResult> | null = null;
     return {
+      requestExit(): Promise<ExitResult> {
+        if (!bridge.shutDownPageContainer) return Promise.resolve('unsupported');
+        if (!pendingExit) {
+          // Vega uses one root page, including its answer/settings views.
+          // Mode 1 requests the native confirmation; true is not proof of exit.
+          const operation = Promise.resolve().then(() => bridge.shutDownPageContainer!(1));
+          pendingExit = withTimeout(operation, 5000)
+            .then((ok): ExitResult => ok === true ? 'requested' : 'failed', (): ExitResult => 'failed');
+          // A timeout does not cancel the host call. Keep deduplicating until
+          // that actual call settles, even after reporting an uncertain result.
+          void operation.then(() => { pendingExit = null; }, () => { pendingExit = null; });
+        }
+        return pendingExit;
+      },
       async setMicrophoneEnabled(enabled: boolean): Promise<boolean> {
         return bridge.audioControl(enabled);
       },
