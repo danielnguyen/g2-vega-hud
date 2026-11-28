@@ -26,7 +26,7 @@
     "@evenrealities/evenhub-cli": "^0.1.12",
     "@evenrealities/evenhub-simulator": "^0.7.2",
     "typescript": "^5.8.2",
-    "vite": "^6.2.0",
-    "vitest": "^3.0.8"
+    "vite": "^6.4.6",
+    "vitest": "~4.1.12"
   }
 }
