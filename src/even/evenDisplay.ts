@@ -142,7 +142,7 @@ export function frameForState(state: AppState): Frame {
     return {
       title: `${state.response.title} ${state.pageIndex + 1}/${state.response.pages.length}`,
       body: formatForGlasses(state.response.pages[state.pageIndex] ?? ''),
-      help: PAGES_FOOTER
+      help: state.homeMessage ? formatForGlasses(state.homeMessage) : PAGES_FOOTER
     };
   }
 

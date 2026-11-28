@@ -1,4 +1,5 @@
 import { DeviceConnectType, type DeviceStatus, OsEventTypeList, waitForEvenAppBridge, type EvenHubEvent } from '@evenrealities/even_hub_sdk';
+import type { ExitResult } from '../conversationInput';
 import type { InputEventName } from '../input';
 import type { GlassesInputDebugEvent } from '../types';
 
@@ -6,6 +7,7 @@ type EvenInputBridgeLike = {
   onEvenHubEvent(callback: (event: EvenHubEvent) => void): () => void;
   onDeviceStatusChanged(callback: (status: DeviceStatus) => void): () => void;
   audioControl(enabled: boolean): Promise<boolean>;
+  shutDownPageContainer?(exitMode: number): Promise<boolean>;
 };
 
 export type NormalizedEvenInputEvent = GlassesInputDebugEvent & {
@@ -16,9 +18,11 @@ export type EvenInputHandlers = {
   onInput(event: NormalizedEvenInputEvent): void;
   onPcm(chunk: Uint8Array): void;
   onExit(): void;
+  onOverlayChanged(visible: boolean): void;
 };
 
 export type EvenInputBinding = {
+  requestExit(): Promise<ExitResult>;
   setMicrophoneEnabled(enabled: boolean): Promise<boolean>;
   dispose(): void;
 };
@@ -42,12 +46,17 @@ export async function bindEvenInput(
         return;
       }
 
-      const normalized = normalizeEvenHubEvent(event);
-      handlers.onInput(normalized);
-
-      if (isExitEvent(eventTypeOf(event.sysEvent), eventTypeOf(event.textEvent))) {
+      const types = [eventTypeOf(event.sysEvent), eventTypeOf(event.textEvent)];
+      // Lifecycle takes priority over an input in the other envelope. Foreground
+      // events describe the host overlay, not permanent application closure.
+      if (types.some(type => type === OsEventTypeList.ABNORMAL_EXIT_EVENT || type === OsEventTypeList.SYSTEM_EXIT_EVENT)) {
         handlers.onExit();
+      } else if (types.includes(OsEventTypeList.FOREGROUND_ENTER_EVENT)) {
+        handlers.onOverlayChanged(true);
+      } else if (types.includes(OsEventTypeList.FOREGROUND_EXIT_EVENT)) {
+        handlers.onOverlayChanged(false);
       }
+      handlers.onInput(normalizeEvenHubEvent(event));
     });
 
     const unsubscribeStatus = bridge.onDeviceStatusChanged((status) => {
@@ -55,7 +64,22 @@ export async function bindEvenInput(
           status.connectType === DeviceConnectType.ConnectionFailed) handlers.onExit();
     });
 
+    let pendingExit: Promise<ExitResult> | null = null;
     return {
+      requestExit(): Promise<ExitResult> {
+        if (!bridge.shutDownPageContainer) return Promise.resolve('unsupported');
+        if (!pendingExit) {
+          // Vega uses one root page, including its answer/settings views.
+          // Mode 1 requests the native confirmation; true is not proof of exit.
+          const operation = Promise.resolve().then(() => bridge.shutDownPageContainer!(1));
+          pendingExit = withTimeout(operation, 5000)
+            .then((ok): ExitResult => ok === true ? 'requested' : 'failed', (): ExitResult => 'failed');
+          // A timeout does not cancel the host call. Keep deduplicating until
+          // that actual call settles, even after reporting an uncertain result.
+          void operation.then(() => { pendingExit = null; }, () => { pendingExit = null; });
+        }
+        return pendingExit;
+      },
       async setMicrophoneEnabled(enabled: boolean): Promise<boolean> {
         return bridge.audioControl(enabled);
       },
@@ -120,6 +144,10 @@ function mapEvenHubEvent(
   textType: OsEventTypeList | null,
   sysType: OsEventTypeList | null
 ): InputEventName | null {
+  if ([sysType, textType].some(type => type === OsEventTypeList.FOREGROUND_ENTER_EVENT ||
+      type === OsEventTypeList.FOREGROUND_EXIT_EVENT || type === OsEventTypeList.ABNORMAL_EXIT_EVENT ||
+      type === OsEventTypeList.SYSTEM_EXIT_EVENT)) return null;
+
   if (sysType === OsEventTypeList.DOUBLE_CLICK_EVENT || textType === OsEventTypeList.DOUBLE_CLICK_EVENT) {
     return 'doublePress';
   }
@@ -177,18 +205,6 @@ function eventSourceLabel(eventSource: number | undefined): string | null {
     default:
       return null;
   }
-}
-
-function isExitEvent(
-  sysType: OsEventTypeList | null,
-  textType: OsEventTypeList | null
-): boolean {
-  return [sysType, textType].some(
-    (eventType) =>
-      eventType === OsEventTypeList.FOREGROUND_EXIT_EVENT ||
-      eventType === OsEventTypeList.ABNORMAL_EXIT_EVENT ||
-      eventType === OsEventTypeList.SYSTEM_EXIT_EVENT
-  );
 }
 
 async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
