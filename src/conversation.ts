@@ -31,18 +31,28 @@ export class Conversation {
   private micUncertain = false;
   private conversationId: string | undefined;
   private exited = false;
+  private overlayVisible = false;
 
   constructor(private readonly deps: Dependencies) {}
 
   get busy(): boolean { return this.controller !== null; }
 
+  get canExit(): boolean { return !this.busy && !this.micUncertain; }
+
   start(config: AppConfig): void {
-    if (this.busy || this.exited) return;
+    if (this.busy || this.exited || this.overlayVisible) return;
     if (this.micUncertain) { this.deps.error(MIC_UNCERTAIN); return; }
     if (!this.deps.ready()) { this.deps.error('G2 microphone or startup page unavailable.'); return; }
     const controller = new AbortController();
     this.controller = controller;
     void this.run(config, controller);
+  }
+
+  setOverlayVisible(visible: boolean): void {
+    this.overlayVisible = visible;
+    if (visible) this.stop();
+    // Dismissal only permits a later deliberate start. It never clears exited
+    // or micUncertain, and cannot rearm a cancelled conversation.
   }
 
   stop(exit = false): void {
