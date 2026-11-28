@@ -128,18 +128,48 @@ describe('noncritical native image transport', () => {
     await display.render({ ...state, screen: 'settings' }); await settle();
     expect(mock.updateImageRawData.mock.calls[1][0].imageData).toEqual(mavisBytes('blank'));
   });
-  it('supports missing image APIs and a rejected image layout without losing the startup/input surface', async () => {
+  it('supports missing image APIs with text-only startup', async () => {
     const missing = bridge();
     delete (missing as any).updateImageRawData;
     const { display } = await displayFor(missing);
     expect(display).not.toBeNull();
     expect(missing.createStartUpPageContainer.mock.calls[0][0].containerTotalNum).toBe(3);
-    const rejected = bridge();
-    rejected.createStartUpPageContainer.mockResolvedValueOnce(1);
-    const fallback = await displayFor(rejected);
-    expect(fallback.display).not.toBeNull();
-    expect(rejected.createStartUpPageContainer.mock.calls[1][0].containerTotalNum).toBe(3);
-    await fallback.display.render(state);
-    expect(rejected.updateImageRawData).not.toHaveBeenCalled();
+    expect(missing.rebuildPageContainer).not.toHaveBeenCalled();
+  });
+  it.each(['invalid', 'rejected'])('recovers %s image startup through rebuild, never a second startup', async mode => {
+    const mock = bridge();
+    // Model the one-shot SDK contract: no subsequent startup can succeed.
+    mock.createStartUpPageContainer.mockResolvedValue(1);
+    if (mode === 'rejected') mock.createStartUpPageContainer.mockRejectedValue(new Error('unsupported image'));
+    const { display } = await displayFor(mock);
+    expect(display).not.toBeNull();
+    expect(mock.createStartUpPageContainer).toHaveBeenCalledTimes(1);
+    expect(mock.rebuildPageContainer).toHaveBeenCalledTimes(1);
+    const page = mock.rebuildPageContainer.mock.calls[0][0];
+    expect(page.containerTotalNum).toBe(3);
+    expect(page.imageObject).toBeUndefined();
+    expect(page.textObject.filter((x: any) => x.isEventCapture === 1).map((x: any) => x.containerName)).toEqual(['body']);
+    await display.render(showListening(movePage(answer, 1)));
+    expect(mock.textContainerUpgrade).toHaveBeenCalledWith(expect.objectContaining({ containerName: 'title', content: 'Listening... 2/2' }));
+    expect(mock.textContainerUpgrade).toHaveBeenCalledWith(expect.objectContaining({ containerName: 'body', content: 'second' }));
+    expect(mock.updateImageRawData).not.toHaveBeenCalled();
+  });
+  it.each(['false', 'undefined', 'rejected', 'timeout'])('does not expose a ready display when recovery is %s', async mode => {
+    vi.useFakeTimers();
+    const mock = bridge();
+    mock.createStartUpPageContainer.mockResolvedValue(1);
+    if (mode === 'false') mock.rebuildPageContainer.mockResolvedValue(false);
+    if (mode === 'undefined') mock.rebuildPageContainer.mockResolvedValue(undefined);
+    if (mode === 'rejected') mock.rebuildPageContainer.mockRejectedValue(new Error('rebuild failed'));
+    let release!: (value: boolean) => void;
+    if (mode === 'timeout') mock.rebuildPageContainer.mockReturnValue(new Promise(resolve => { release = resolve; }));
+    const pending = displayFor(mock);
+    await vi.advanceTimersByTimeAsync(1501);
+    expect((await pending).display).toBeNull();
+    if (release) { release(true); await settle(); }
+    expect(mock.createStartUpPageContainer).toHaveBeenCalledTimes(1);
+    expect(mock.rebuildPageContainer).toHaveBeenCalledTimes(1);
+    expect(mock.updateImageRawData).not.toHaveBeenCalled();
+    expect(mock.textContainerUpgrade).not.toHaveBeenCalled();
   });
 });

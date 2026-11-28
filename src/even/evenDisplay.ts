@@ -95,7 +95,10 @@ class EvenGlassesDisplay implements EvenDisplay {
     }
     if (result !== 0 && this.imagesEnabled) {
       this.imagesEnabled = false;
-      result = await this.bridge.createStartUpPageContainer(this.page(false));
+      // Startup is one-shot, including a rejected image layout. Subsequent
+      // page creation must use rebuild and its boolean acknowledgement.
+      const recovered = await this.bridge.rebuildPageContainer!(this.page(false));
+      result = recovered === true ? 0 : -1;
     }
     if (result !== 0) throw new Error('Glasses startup page unavailable');
     this.initialized = true;
