@@ -1,3 +1,4 @@
+import { mavisForState, mavisUrl } from './mavis';
 import {
   CONNECTING_FOOTER,
   ERROR_FOOTER,
@@ -42,6 +43,16 @@ function renderFrame(state: AppState): HTMLElement {
       break;
   }
 
+  const sprite = mavisForState(state);
+  if (sprite !== 'blank') {
+    const mascot = document.createElement('img');
+    mascot.src = mavisUrl(sprite);
+    mascot.alt = ''; // Status is already expressed in text.
+    mascot.width = 80;
+    mascot.height = 80;
+    mascot.className = 'mavis';
+    frame.querySelector('.screen')?.prepend(mascot);
+  }
   return frame;
 }
 

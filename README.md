@@ -202,3 +202,7 @@ This is a client-side app. Anything placed in `VITE_*` variables is potentially 
 After independent native review of the exact PR head, use a separate local checkout of that reviewed commit. Run `npm ci`, `npm test`, `npm run build`, and `npm run build:packaged`. For a QR test, use the existing `npm run dev` and `npm run qr` flow above. For packaged testing, copy `app.json.example` to the ignored `app.json`, set the actual gateway whitelist, and run `npm run pack`. Configure the narrow runtime token only through phone settings. The placeholder gateway is sufficient for a build check, not a functional device test.
 
 Follow the existing local version/cache guidance if Even Hub caches an earlier upload; keep candidate-only version changes out of the PR. Record the reviewed source SHA and local test-package version together. These instructions do not require tags, a merge, CI dispatch, or production deployment. The owner controls installing the reviewed test candidate and recording real G2 acceptance.
+
+## Mavis state sprites
+
+The native glasses header and phone preview show the approved Mavis artwork for the current conversation state. Explicit status text remains authoritative, including while a previous answer is visible during rearm. Images are bundled locally and optional: text and input remain independent of image transfers. See [asset provenance, layout previews and validation limitations](docs/mavis.md). Real G2 acceptance remains pending owner testing of the independently reviewed candidate.

@@ -1,4 +1,4 @@
-import { waitForEvenAppBridge } from '@evenrealities/even_hub_sdk';
+import { ImageRawDataUpdateResult, ImageContainerProperty, ImageRawDataUpdate, waitForEvenAppBridge } from '@evenrealities/even_hub_sdk';
 import {
   CONNECTING_FOOTER,
   ERROR_FOOTER,
@@ -11,10 +11,12 @@ import {
 } from '../constants';
 import type { AppState } from '../types';
 import { APP_VERSION } from '../version';
+import { mavisBytes, mavisForState, type MavisSprite } from '../mavis';
 
 const TITLE_ID = 1;
 const BODY_ID = 2;
 const HELP_ID = 3;
+const MAVIS_ID = 4;
 
 type TextContainerPayload = {
   containerID: number;
@@ -30,6 +32,7 @@ type TextContainerPayload = {
 type PageContainerPayload = {
   containerTotalNum: number;
   textObject: TextContainerPayload[];
+  imageObject?: ImageContainerProperty[];
 };
 
 type TextUpgradePayload = {
@@ -41,6 +44,8 @@ type TextUpgradePayload = {
 type EvenBridgeLike = {
   createStartUpPageContainer(container: PageContainerPayload): Promise<number>;
   textContainerUpgrade(container: TextUpgradePayload): Promise<boolean>;
+  updateImageRawData?(data: ImageRawDataUpdate): Promise<ImageRawDataUpdateResult>;
+  rebuildPageContainer?(container: PageContainerPayload): Promise<boolean>;
 };
 
 type Frame = {
@@ -68,22 +73,30 @@ class EvenGlassesDisplay implements EvenDisplay {
   private initialized = false;
   private writes: Promise<void> = Promise.resolve();
   private revision = 0;
+  private imagesEnabled = false;
+  private imageBusy = false;
+  private pendingSprite: MavisSprite | undefined;
+  private sentSprite: MavisSprite | undefined;
+  private latestState: AppState | undefined;
 
   constructor(private readonly bridge: EvenBridgeLike) {}
 
   async initialize(): Promise<void> {
     if (this.initialized) return;
 
-    const page: PageContainerPayload = {
-      containerTotalNum: 3,
-      textObject: [
-        textContainer(TITLE_ID, 'title', 24, 24, 560, 48, APP_VERSION, 0),
-        textContainer(BODY_ID, 'body', 24, 88, 560, 180, 'Ready.', 1),
-        textContainer(HELP_ID, 'help', 24, 286, 560, 32, HOME_FOOTER, 0)
-      ]
-    };
-
-    const result = await this.bridge.createStartUpPageContainer(page);
+    this.imagesEnabled = typeof this.bridge.updateImageRawData === 'function' &&
+      typeof this.bridge.rebuildPageContainer === 'function';
+    let result: number;
+    try {
+      result = await this.bridge.createStartUpPageContainer(this.page(this.imagesEnabled));
+    } catch (error) {
+      if (!this.imagesEnabled) throw error;
+      result = -1;
+    }
+    if (result !== 0 && this.imagesEnabled) {
+      this.imagesEnabled = false;
+      result = await this.bridge.createStartUpPageContainer(this.page(false));
+    }
     if (result !== 0) throw new Error('Glasses startup page unavailable');
     this.initialized = true;
   }
@@ -91,6 +104,8 @@ class EvenGlassesDisplay implements EvenDisplay {
   async render(state: AppState): Promise<void> {
     if (!this.initialized) return;
 
+    this.latestState = state;
+    this.queueSprite(mavisForState(state));
     const frame = frameForState(state);
     const revision = ++this.revision;
     this.writes = this.writes.catch(() => undefined).then(async () => {
@@ -102,6 +117,64 @@ class EvenGlassesDisplay implements EvenDisplay {
       ]);
     });
     return this.writes;
+  }
+
+  private page(withImage: boolean): PageContainerPayload {
+    const frame = this.latestState ? frameForState(this.latestState) :
+      { title: APP_VERSION, body: 'Ready.', help: HOME_FOOTER };
+    return {
+      containerTotalNum: withImage ? 4 : 3,
+      textObject: [
+        textContainer(TITLE_ID, 'title', 112, 8, 440, 80, frame.title, 0),
+        textContainer(BODY_ID, 'body', 24, 92, 528, 156, frame.body, 1),
+        textContainer(HELP_ID, 'help', 24, 256, 528, 32, frame.help, 0)
+      ],
+      ...(withImage ? { imageObject: [new ImageContainerProperty({
+        containerID: MAVIS_ID, containerName: 'mavis',
+        xPosition: 24, yPosition: 8, width: 80, height: 80
+      })] } : {})
+    };
+  }
+
+  private queueSprite(sprite: MavisSprite): void {
+    if (!this.imagesEnabled) return;
+    // One in-flight transfer plus one replaceable desired state, never a FIFO.
+    this.pendingSprite = sprite;
+    if (!this.imageBusy) void this.flushSprite();
+  }
+
+  private async flushSprite(): Promise<void> {
+    const sprite = this.pendingSprite;
+    this.pendingSprite = undefined;
+    if (!this.imagesEnabled || sprite === undefined || sprite === this.sentSprite) return;
+    this.imageBusy = true;
+    try {
+      const result = await withTimeout(this.bridge.updateImageRawData!(new ImageRawDataUpdate({
+        containerID: MAVIS_ID, containerName: 'mavis', imageData: mavisBytes(sprite)
+      })), 1500);
+      if (!ImageRawDataUpdateResult.isSuccess(result)) throw new Error('Image unavailable');
+      this.sentSprite = sprite;
+    } catch {
+      // A timed-out native write may still be running: never start another image
+      // transfer. Attempt to remove the container to clear a stale listening pose.
+      this.imagesEnabled = false;
+      this.pendingSprite = undefined;
+      void this.removeSprite();
+    } finally {
+      this.imageBusy = false;
+      if (this.imagesEnabled && this.pendingSprite !== undefined) void this.flushSprite();
+    }
+  }
+
+  private async removeSprite(): Promise<void> {
+    try {
+      // Text and microphone work never wait for this optional recovery operation.
+      await this.bridge.rebuildPageContainer!(this.page(false));
+      // A delayed rebuild may contain old text; immediately restore the newest frame.
+      if (this.latestState) void this.render(this.latestState).catch(() => undefined);
+    } catch {
+      // Existing text containers/input remain usable when the host rejects rebuild.
+    }
   }
 }
 
