@@ -18,6 +18,7 @@ import {
 } from './runtimeStatus';
 import { clearSettings, saveSettings, type RuntimeSettings } from './settings';
 import { Conversation } from './conversation';
+import { ConversationInput } from './conversationInput';
 import {
   applyConfig,
   backHome,
@@ -150,21 +151,20 @@ function bindSettingsControls(): void {
   });
 }
 
+const conversationInput = new ConversationInput({
+  state: () => state,
+  busy: () => conversation.busy,
+  canExit: () => conversation.canExit,
+  start: () => { void startListening(); },
+  stop: () => conversation.stop(),
+  movePage: delta => commit(movePage(state, delta)),
+  home: () => commit(backHome(state)),
+  exit: () => evenInput?.requestExit() ?? Promise.resolve('unsupported'),
+  message: message => commit({ ...state, homeMessage: message, errorMessage: message })
+});
+
 function handleInput(eventName: InputEventName): void {
-  if (state.response && ['pages', 'connecting', 'listening', 'thinking', 'stopping'].includes(state.screen)) {
-    if (eventName === 'up') commit(movePage(state, -1));
-    if (eventName === 'down') commit(movePage(state, 1));
-  }
-  if (conversation.busy) {
-    if (eventName === 'doublePress') conversation.stop();
-    return;
-  }
-  if (state.screen === 'home' || state.screen === 'pages') {
-    if (eventName === 'press') void startListening();
-    if (eventName === 'doublePress') commit(backHome(state));
-  } else if (state.screen === 'error' && (eventName === 'press' || eventName === 'doublePress')) {
-    commit(backHome(state));
-  }
+  conversationInput.handle(eventName);
 }
 
 function handleEvenInput(event: NormalizedEvenInputEvent): void {
@@ -190,7 +190,11 @@ async function initializeEvenInput(): Promise<void> {
     onPcm: (chunk) => {
       conversation.sendPcm(chunk);
     },
-    onExit: cleanupForExit
+    onExit: cleanupForExit,
+    onOverlayChanged: visible => {
+      conversation.setOverlayVisible(visible);
+      conversationInput.setOverlayVisible(visible);
+    }
   });
 }
 

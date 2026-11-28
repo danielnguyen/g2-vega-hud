@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { ConversationInput } from './conversationInput';
+import type { AppState } from './types';
 import { Conversation, MIC_UNCERTAIN } from './conversation';
 import type { SpeechToTextHandlers, SpeechToTextSession } from './speechToText';
 import type { AppConfig } from './config';
@@ -60,6 +62,7 @@ describe('deliberate sequential conversation', () => {
     c.stop(); await flush();
     expect(sessions.every(s => vi.mocked(s.cancel).mock.calls.length === 1)).toBe(true);
     expect(c.busy).toBe(false);
+    expect(c.canExit).toBe(true);
     c.start(config); await flush(); expect(handlers).toHaveLength(5);
     c.stop(); await flush();
   });
@@ -101,6 +104,7 @@ describe('deliberate sequential conversation', () => {
     handlers[0].onUtteranceComplete('hello'); await flush();
     if (result === 'timeout') await vi.advanceTimersByTimeAsync(10_000);
     expect(deps.error).toHaveBeenCalledWith(MIC_UNCERTAIN);
+    expect(c.canExit).toBe(false);
     expect(deps.submit).not.toHaveBeenCalled();
     c.start(config); await flush(); expect(deps.bootstrap).toHaveBeenCalledTimes(1);
   });
@@ -110,6 +114,7 @@ describe('deliberate sequential conversation', () => {
     deps.microphone.mockImplementationOnce(() => enable.promise);
     c.start(config); await flush(); await vi.advanceTimersByTimeAsync(15_000);
     expect(deps.error).toHaveBeenCalledWith(MIC_UNCERTAIN);
+    expect(c.canExit).toBe(false);
     c.start(config); enable.resolve(true); await flush();
     expect(deps.microphone.mock.calls).toEqual([[true], [false], [false]]);
     expect(deps.bootstrap).toHaveBeenCalledTimes(1);
@@ -132,6 +137,7 @@ describe('deliberate sequential conversation', () => {
     if (reason === 'empty') handlers[0].onUtteranceComplete('  ');
     if (reason === 'provider') handlers[0].onError();
     await flush(); expect(deps.submit).not.toHaveBeenCalled(); expect(c.busy).toBe(false);
+    expect(c.canExit).toBe(true);
     c.start(config); await flush(); expect(deps.bootstrap).toHaveBeenCalledTimes(2); c.stop(); await flush();
   });
 
@@ -167,6 +173,7 @@ describe('deliberate sequential conversation', () => {
     deps.poll.mockResolvedValueOnce({ state: 'failed' });
     handlers[1].onUtteranceComplete('again'); await flush();
     expect(handlers).toHaveLength(2); expect(c.busy).toBe(false);
+    expect(c.canExit).toBe(true);
     c.start(config); await flush(); handlers[2].onUtteranceComplete('resume'); await flush();
     expect((deps.submit.mock.calls[2] as any)[2].conversationId).toBe('same');
     c.stop(); await flush();
@@ -182,4 +189,41 @@ describe('deliberate sequential conversation', () => {
     expect((deps.submit.mock.calls[2] as any)[2].conversationId).toBe(kind === 'non_current' ? undefined : 'same');
     c.stop(); await flush();
   });
+});
+
+
+it.each(['connecting', 'listening', 'thinking'] as const)('real controller stops %s before a distinct exit without stale work', async phase => {
+  const { conversation: c, deps, handlers } = setup();
+  const pending = deferred<any>();
+  const micOff = deferred<boolean>();
+  if (phase === 'connecting') deps.bootstrap.mockReturnValueOnce(pending.promise);
+  if (phase === 'thinking') deps.submit.mockReturnValueOnce(pending.promise);
+  const state = { screen: 'home', response: null } as AppState;
+  deps.phase.mockImplementation(screen => { state.screen = screen; });
+  deps.stopped.mockImplementation(() => { state.screen = 'home'; });
+  const exit = vi.fn(async () => 'requested' as const);
+  const input = new ConversationInput({
+    state: () => state, busy: () => c.busy, canExit: () => c.canExit,
+    start: () => c.start(config), stop: () => c.stop(), movePage: vi.fn(),
+    home: vi.fn(), exit, message: vi.fn()
+  });
+  input.handle('press'); await flush();
+  if (phase === 'thinking') { handlers[0].onUtteranceComplete('question'); await flush(); }
+  if (phase === 'listening') deps.microphone.mockImplementationOnce(() => micOff.promise);
+  input.handle('doublePress'); await flush();
+  await vi.advanceTimersByTimeAsync(601);
+  input.handle('doublePress'); input.handle('press');
+  expect(exit).not.toHaveBeenCalled(); expect(c.canExit).toBe(false);
+  if (phase === 'listening') micOff.resolve(true);
+  else pending.resolve(phase === 'thinking' ? answer : { provider: 'deepgram', token: 'late', expires_in: 60 });
+  await flush();
+  input.handle('doublePress'); expect(exit).not.toHaveBeenCalled();
+  await vi.advanceTimersByTimeAsync(601);
+  input.handle('doublePress'); await flush();
+  expect(exit).toHaveBeenCalledOnce(); expect(c.canExit).toBe(true);
+  expect(deps.answer).not.toHaveBeenCalled();
+  expect(deps.submit).toHaveBeenCalledTimes(phase === 'thinking' ? 1 : 0);
+  expect(deps.bootstrap).toHaveBeenCalledTimes(1);
+  c.stop(true); c.start(config); await flush();
+  expect(deps.bootstrap).toHaveBeenCalledTimes(1);
 });
