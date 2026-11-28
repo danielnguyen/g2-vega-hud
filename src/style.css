@@ -160,3 +160,10 @@ footer {
     grid-template-columns: 1fr;
   }
 }
+
+.mavis {
+  display: block;
+  width: 80px;
+  height: 80px;
+  margin: 0 0 12px;
+}
