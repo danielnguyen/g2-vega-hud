@@ -56,7 +56,7 @@ describe('Even lifecycle and answer surface', () => {
       onEvenHubEvent: (fn: typeof input) => { input = fn; return unsubscribe; },
       onDeviceStatusChanged: (fn: typeof status) => { status = fn; return unsubscribeStatus; }
     } as any);
-    const handlers = { onInput: vi.fn(), onPcm: vi.fn(), onExit: vi.fn() };
+    const handlers = { onInput: vi.fn(), onPcm: vi.fn(), onExit: vi.fn(), onOverlayChanged: vi.fn() };
     const binding = (await bindEvenInput(handlers))!;
     expect(await binding.setMicrophoneEnabled(true)).toBe(false);
     input({ audioEvent: { audioPcm: new Uint8Array([1]) } } as any);
@@ -67,7 +67,8 @@ describe('Even lifecycle and answer surface', () => {
     input({ sysEvent: { eventType: OsEventTypeList.FOREGROUND_EXIT_EVENT } } as any);
     status({ connectType: DeviceConnectType.Disconnected } as DeviceStatus);
     status({ connectType: DeviceConnectType.ConnectionFailed } as DeviceStatus);
-    expect(handlers.onExit).toHaveBeenCalledTimes(3);
+    expect(handlers.onExit).toHaveBeenCalledTimes(2);
+    expect(handlers.onOverlayChanged).toHaveBeenCalledWith(false);
     binding.dispose(); expect(unsubscribe).toHaveBeenCalled(); expect(unsubscribeStatus).toHaveBeenCalled();
   });
 });
@@ -82,7 +83,7 @@ it.each([true, false, 'reject', 'unsupported', 'timeout'] as const)('handles %s 
     onEvenHubEvent: () => () => {}, onDeviceStatusChanged: () => () => {},
     ...(result === 'unsupported' ? {} : { shutDownPageContainer: shutdown })
   } as any);
-  const binding = (await bindEvenInput({ onInput: vi.fn(), onPcm: vi.fn(), onExit: vi.fn() }))!;
+  const binding = (await bindEvenInput({ onInput: vi.fn(), onPcm: vi.fn(), onExit: vi.fn(), onOverlayChanged: vi.fn() }))!;
   const first = binding.requestExit(); const duplicate = binding.requestExit();
   await vi.runAllTimersAsync();
   expect(await first).toBe(result === true ? 'requested' : result === 'unsupported' ? 'unsupported' : 'failed');

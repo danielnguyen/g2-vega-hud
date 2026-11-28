@@ -190,7 +190,11 @@ async function initializeEvenInput(): Promise<void> {
     onPcm: (chunk) => {
       conversation.sendPcm(chunk);
     },
-    onExit: cleanupForExit
+    onExit: cleanupForExit,
+    onOverlayChanged: visible => {
+      conversation.setOverlayVisible(visible);
+      conversationInput.setOverlayVisible(visible);
+    }
   });
 }
 
@@ -203,7 +207,7 @@ async function initializeEvenDisplay(): Promise<void> {
 }
 
 async function startListening(): Promise<void> {
-  if (conversation.busy || conversationInput.exitPending) return;
+  if (conversation.busy) return;
   if (!config) {
     commit(openSettings(state, state.settingsDraft, 'Settings required before use.'));
     return;

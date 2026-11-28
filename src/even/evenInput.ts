@@ -18,6 +18,7 @@ export type EvenInputHandlers = {
   onInput(event: NormalizedEvenInputEvent): void;
   onPcm(chunk: Uint8Array): void;
   onExit(): void;
+  onOverlayChanged(visible: boolean): void;
 };
 
 export type EvenInputBinding = {
@@ -45,12 +46,17 @@ export async function bindEvenInput(
         return;
       }
 
-      const normalized = normalizeEvenHubEvent(event);
-      handlers.onInput(normalized);
-
-      if (isExitEvent(eventTypeOf(event.sysEvent), eventTypeOf(event.textEvent))) {
+      const types = [eventTypeOf(event.sysEvent), eventTypeOf(event.textEvent)];
+      // Lifecycle takes priority over an input in the other envelope. Foreground
+      // events describe the host overlay, not permanent application closure.
+      if (types.some(type => type === OsEventTypeList.ABNORMAL_EXIT_EVENT || type === OsEventTypeList.SYSTEM_EXIT_EVENT)) {
         handlers.onExit();
+      } else if (types.includes(OsEventTypeList.FOREGROUND_ENTER_EVENT)) {
+        handlers.onOverlayChanged(true);
+      } else if (types.includes(OsEventTypeList.FOREGROUND_EXIT_EVENT)) {
+        handlers.onOverlayChanged(false);
       }
+      handlers.onInput(normalizeEvenHubEvent(event));
     });
 
     const unsubscribeStatus = bridge.onDeviceStatusChanged((status) => {
@@ -138,6 +144,10 @@ function mapEvenHubEvent(
   textType: OsEventTypeList | null,
   sysType: OsEventTypeList | null
 ): InputEventName | null {
+  if ([sysType, textType].some(type => type === OsEventTypeList.FOREGROUND_ENTER_EVENT ||
+      type === OsEventTypeList.FOREGROUND_EXIT_EVENT || type === OsEventTypeList.ABNORMAL_EXIT_EVENT ||
+      type === OsEventTypeList.SYSTEM_EXIT_EVENT)) return null;
+
   if (sysType === OsEventTypeList.DOUBLE_CLICK_EVENT || textType === OsEventTypeList.DOUBLE_CLICK_EVENT) {
     return 'doublePress';
   }
@@ -195,18 +205,6 @@ function eventSourceLabel(eventSource: number | undefined): string | null {
     default:
       return null;
   }
-}
-
-function isExitEvent(
-  sysType: OsEventTypeList | null,
-  textType: OsEventTypeList | null
-): boolean {
-  return [sysType, textType].some(
-    (eventType) =>
-      eventType === OsEventTypeList.FOREGROUND_EXIT_EVENT ||
-      eventType === OsEventTypeList.ABNORMAL_EXIT_EVENT ||
-      eventType === OsEventTypeList.SYSTEM_EXIT_EVENT
-  );
 }
 
 async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {

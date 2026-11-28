@@ -34,7 +34,7 @@ it.each(['home', 'pages', 'error'] as const)('requests host exit from %s without
   const { input, deps } = setup(screen);
   input.handle('doublePress'); await vi.runAllTimersAsync();
   expect(deps.exit).toHaveBeenCalledTimes(1); expect(deps.home).not.toHaveBeenCalled();
-  expect(deps.message).toHaveBeenCalledWith(expect.stringContaining('Confirm'));
+  expect(deps.message).not.toHaveBeenCalled();
 });
 
 it('preserves single tap, scrolling, error recovery and settings', () => {
@@ -49,10 +49,10 @@ it('deduplicates a pending request and permits deliberate resume after cancellin
   const { input, deps } = setup();
   let release!: (result: ExitResult) => void;
   deps.exit.mockReturnValue(new Promise(resolve => { release = resolve; }));
-  input.handle('doublePress'); quiet(); input.handle('doublePress'); input.handle('press');
+  input.handle('doublePress'); input.setOverlayVisible(true); quiet(); input.handle('doublePress'); input.handle('press');
   expect(input.exitPending).toBe(true); expect(deps.start).not.toHaveBeenCalled();
   expect(deps.exit).toHaveBeenCalledOnce();
-  release('requested'); await vi.runAllTimersAsync(); quiet(); input.handle('press');
+  release('requested'); await vi.runAllTimersAsync(); input.setOverlayVisible(false); input.handle('press');
   expect(input.exitPending).toBe(false); expect(deps.start).toHaveBeenCalledOnce();
 });
 
